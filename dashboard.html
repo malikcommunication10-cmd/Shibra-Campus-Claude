@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="grid g-stats" id="stats"></div>
+  <div class="grid g-2" style="margin-top:16px">
+    <div class="card">
+      <div class="card-h"><h2>Setup checklist</h2></div>
+      <ul class="steps" id="steps"></ul>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Build progress</h2></div>
+      <ul class="steps" id="phases"></ul>
+    </div>
+  </div>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('dashboard', 'Dashboard');
+  const [classes, sections, users, students, applicants] = await Promise.all([DB.list('classes'), DB.list('sections'), DB.list('users'), DB.list('students'), DB.list('applicants')]);
+  const [receipts, ledger] = await Promise.all([DB.list('receipts'), DB.list('ledger')]);
+  const todayCol = receipts.filter(r => r.date === today()).reduce((a, r) => a + (+r.received || 0), 0);
+  const dueBy = {}; ledger.forEach(l => { if (l.student_id) dueBy[l.student_id] = (dueBy[l.student_id] || 0) + (+l.debit || 0) - (+l.credit || 0); });
+  const totalDues = students.filter(x => x.status !== undefined).reduce((a, x) => a + Math.max(0, dueBy[x.id] || 0), 0);
+  const active = students.filter(x => x.status === 'Active').length;
+  const cur = ctx.settings.currency;
+
+  // Ye cards Phase 2-4 mein asli data se bharenge (abhi 0)
+  const stats = [
+    ['Active students', String(active), `${students.length - active} inactive/passout`],
+    ['Pending admissions', String(applicants.filter(a => ['Registered', 'Waiting'].includes(a.status)).length), 'registered applicants'],
+    ["Today's collection", money(todayCol, cur), 'sab receipts'],
+    ['Total dues', money(totalDues, cur), 'baqaya'],
+    ['Cash in hand', money(0, cur), 'Phase 5 ke baad'],
+    ['Low stock items', '0', 'Phase 4 ke baad']
+  ];
+  $('#stats').innerHTML = stats.map(([l, v, n]) => `<div class="stat"><small>${l}</small><b>${v}</b><em>${n}</em></div>`).join('');
+
+  const s = ctx.settings;
+  const checks = [
+    ['School ka naam aur address likhein', s.school_name !== 'My School' && !!s.address, 'settings.html'],
+    ['Session set karein', !!ctx.session, 'classes.html'],
+    ['Classes aur sections check karein', classes.length > 0 && sections.length > 0, 'classes.html'],
+    ['Demo passwords badlein', !!localStorage.getItem('serp_pw_changed'), 'settings.html']
+  ];
+  $('#steps').innerHTML = checks.map(([t, ok, href]) =>
+    `<li><span class="dot ${ok ? 'done' : ''}">${ok ? '&#10003;' : ''}</span><a href="${href}" style="flex:1;color:inherit">${t}</a></li>`).join('');
+
+  const phases = [
+    ['1. Layout, login, settings, classes', true],
+    ['2. Admission + students', true],
+    ['3. Fee structure, collection, ledger', true],
+    ['4. Books store', false],
+    ['5. Accounting + reports', false],
+    ['6. Staff + salary', false],
+    ['7. Supabase link', false]
+  ];
+  $('#phases').innerHTML = phases.map(([t, ok]) =>
+    `<li><span class="dot ${ok ? 'done' : ''}">${ok ? '&#10003;' : ''}</span><span style="flex:1">${t}</span>${ok ? '<span class="badge ok">Done</span>' : ''}</li>`).join('');
+})();
+</script>
+</body>
+</html>

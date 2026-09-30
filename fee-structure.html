@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fee Structure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="amounts">Class-wise fee</button>
+    <button data-tab="heads">Fee heads</button>
+    <button data-tab="inc">Fee increment</button>
+    <button data-tab="rules">Late fee &amp; due date</button>
+  </div>
+
+  <section data-pane="amounts">
+    <div class="card">
+      <div class="card-h"><h2>Class-wise amounts</h2><button class="btn needs-edit" id="amSave">Save amounts</button></div>
+      <p class="hint" style="margin:-6px 0 12px">Registration aur Admission ki amount naye applicants par khud aayegi. Monthly heads har challan mein lagte hain.</p>
+      <div class="table-wrap"><table class="rt" id="amTable"></table></div>
+    </div>
+  </section>
+
+  <section data-pane="heads" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Fee heads</h2></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Head</th><th>Type</th><th></th></tr></thead><tbody id="hRows"></tbody></table></div>
+    </div>
+    <div class="card needs-edit">
+      <div class="card-h"><h2>Add custom head</h2></div>
+      <div class="row3">
+        <div class="field"><label for="hName">Head name</label><input id="hName" placeholder="e.g. Computer, Sports"></div>
+        <div class="field"><label for="hType">Type</label><select id="hType"><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="one_time">One time</option></select></div>
+        <div class="field"><label>&nbsp;</label><button class="btn" id="hAdd">Add head</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section data-pane="inc" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Fee increment</h2></div>
+      <div class="row3">
+        <div class="field"><label for="iClass">Class</label><select id="iClass"></select></div>
+        <div class="field"><label for="iHead">Fee head</label><select id="iHead"></select></div>
+        <div class="field"><label for="iMonth">Effective from (month)</label><input id="iMonth" type="month"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Sab rows par ek jaisa increment</label>
+          <div class="dual" style="grid-template-columns:84px 1fr"><select id="iBT"><option value="pct">%</option><option value="rs">Rs.</option></select><input id="iBV" type="number" min="0" step="any" placeholder="0"></div></div>
+        <div class="field"><label for="iRound">Rounding</label><select id="iRound"><option value="1">Nearest Rs. 1</option><option value="10">Nearest Rs. 10</option><option value="50">Nearest Rs. 50</option></select></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost" id="iApply">Apply to all rows</button></div>
+      </div>
+      <label class="check hide" id="iClsWrap"><input type="checkbox" id="iCls"> Class ki fee structure bhi update karein (naye admissions ke liye)</label>
+      <p class="hint">% likhein to Rs. khud aa jata hai, Rs. likhein to % khud aa jata hai. Purane challan nahi badlenge.</p>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Student</th><th>Class</th><th class="num">Current fee</th><th>Increment %</th><th>Increment Rs.</th><th class="num">New fee</th></tr></thead><tbody id="iRows"></tbody></table></div>
+      <div style="margin-top:12px"><button class="btn needs-edit" id="iSave">Save increment</button> <span class="muted" id="iInfo"></span></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Increment history</h2></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Date</th><th>Student</th><th>Head</th><th class="num">Old</th><th class="num">New</th><th>Effective</th><th>By</th></tr></thead><tbody id="ihRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-pane="rules" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Late fee &amp; due date</h2></div>
+      <div class="row">
+        <div class="field"><label for="dueDay">Har mahine due date (tareekh)</label><input id="dueDay" type="number" min="1" max="28"></div>
+        <div class="field"><label for="lateFee">Late fee (Rs., ek dafa per challan)</label><input id="lateFee" type="number" min="0"><div class="hint">0 rakhein to late fee band. Due date guzarne par receive karte waqt lagayi ja sakti hai.</div></div>
+      </div>
+      <button class="btn needs-edit" id="ruSave">Save</button>
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/fees.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('fee-structure', 'Fee Structure');
+  const { settings: S, user } = ctx;
+  switchTabs();
+  const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+  let D = await Fees.data();
+  const TYPE = { monthly: 'Monthly', yearly: 'Yearly', one_time: 'One time' };
+
+  /* ---------- Class-wise amounts ---------- */
+  function drawAmounts() {
+    $('#amTable').innerHTML = `<thead><tr><th>Class</th>${D.heads.map(h => `<th class="num">${esc(h.name)}<br><small class="muted">${TYPE[h.type]}</small></th>`).join('')}</tr></thead><tbody>
+      ${classes.map(c => `<tr><td data-label="Class"><b>${esc(c.name)}</b></td>${D.heads.map(h => {
+        const s = D.structure.find(x => x.class_id === c.id && x.head_id === h.id);
+        return `<td data-label="${esc(h.name)}" class="num"><input type="number" min="0" style="width:100px;text-align:right" data-c="${c.id}" data-h="${h.id}" value="${s ? s.amount : ''}" placeholder="0" aria-label="${esc(c.name)} ${esc(h.name)}"></td>`; }).join('')}</tr>`).join('')}</tbody>`;
+  }
+  $('#amSave').onclick = async () => {
+    let n = 0;
+    for (const i of $$('#amTable input')) {
+      const amount = parseFloat(i.value), ex = D.structure.find(x => x.class_id === i.dataset.c && x.head_id === i.dataset.h);
+      if (isNaN(amount)) { if (ex) { await DB.remove('fee_structure', ex.id); n++; } continue; }
+      if (ex) { if (+ex.amount !== amount) { await DB.update('fee_structure', ex.id, { amount }); n++; } }
+      else { await DB.insert('fee_structure', { class_id: i.dataset.c, head_id: i.dataset.h, amount }); n++; }
+    }
+    await DB.log(user.username, 'fee_structure.save', `${n} changes`);
+    D = await Fees.data(); toast(n ? 'Amounts saved' : 'Koi tabdili nahi'); drawAmounts();
+  };
+
+  /* ---------- Heads ---------- */
+  function drawHeads() {
+    $('#hRows').innerHTML = D.heads.map(h => `<tr><td data-label="Head"><b>${esc(h.name)}</b> ${h.system ? '<span class="badge">System</span>' : ''}</td><td data-label="Type">${TYPE[h.type]}</td>
+      <td class="act">${h.system ? '' : `<button class="btn danger sm needs-edit" data-del="${h.id}">Delete</button>`}</td></tr>`).join('');
+    const opts = D.heads.map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('');
+    const cur = $('#iHead').value; $('#iHead').innerHTML = opts; if (cur) $('#iHead').value = cur;
+  }
+  $('#hAdd').onclick = async () => {
+    const name = $('#hName').value.trim(); if (!name) return toast('Head ka naam likhein', true);
+    if (D.heads.some(h => h.name.toLowerCase() === name.toLowerCase())) return toast('Ye head pehle se hai', true);
+    await DB.insert('fee_heads', { name, type: $('#hType').value, system: false });
+    $('#hName').value = ''; D = await Fees.data(); drawHeads(); drawAmounts(); toast('Head added');
+  };
+  $('#hRows').addEventListener('click', async e => {
+    const b = e.target.closest('[data-del]'); if (!b) return;
+    const used = D.structure.some(x => x.head_id === b.dataset.del) || (await DB.list('challans')).some(c => c.lines.some(l => l.head_id === b.dataset.del));
+    if (used) return toast('Ye head use ho chuka hai, delete nahi ho sakta', true);
+    if (await confirmBox('Head delete karein?', 'Delete')) { await DB.remove('fee_heads', b.dataset.del); D = await Fees.data(); drawHeads(); drawAmounts(); }
+  });
+
+  /* ---------- Increment ---------- */
+  $('#iClass').innerHTML = '<option value="">All classes</option>' + classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('#iMonth').value = curMonth(); $('#iRound').value = String(S.rounding || 1);
+  const cname = id => (classes.find(c => c.id === id) || {}).name || '-';
+
+  function updRow(tr) {
+    const cur = +tr.dataset.cur, rs = parseFloat($('.ir', tr).value) || 0, nf = Math.max(0, roundTo(cur + rs, +$('#iRound').value));
+    tr.dataset.nf = nf; $('.nf', tr).textContent = money(nf, ''); $('.nf', tr).style.color = nf !== cur ? 'var(--accent)' : '';
+  }
+  async function drawInc() {
+    const head = D.heads.find(h => h.id === $('#iHead').value), month = $('#iMonth').value, cl = $('#iClass').value;
+    $('#iClsWrap').classList.toggle('hide', !cl);
+    if (!head || !month) return $('#iRows').innerHTML = '';
+    const st = (await DB.list('students', s => s.status === 'Active' && (!cl || s.class_id === cl))).sort((a, b) => a.gr_no.localeCompare(b.gr_no));
+    $('#iRows').innerHTML = st.map(s => { const cur = Fees.rate(D, s, head, month);
+      return `<tr data-sid="${s.id}" data-cur="${cur}" data-nf="${cur}"><td data-label="Student"><b>${esc(s.name)}</b><br><span class="muted">${esc(s.gr_no)}</span></td><td data-label="Class">${esc(cname(s.class_id))}</td>
+        <td data-label="Current fee" class="num">${money(cur, '')}</td>
+        <td data-label="Increment %"><input class="ip" type="number" step="any" placeholder="%" aria-label="Increment percent"></td>
+        <td data-label="Increment Rs."><input class="ir" type="number" step="any" placeholder="Rs." aria-label="Increment rupees"></td>
+        <td data-label="New fee" class="num nf">${money(cur, '')}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Is class mein koi Active student nahi.</td></tr>';
+    $$('#iRows tr[data-sid]').forEach(tr => dualLink($('.ip', tr), $('.ir', tr), () => +tr.dataset.cur, () => updRow(tr)));
+    $('#iInfo').textContent = `${st.length} students`;
+  }
+  ['iClass', 'iHead', 'iMonth'].forEach(id => $('#' + id).addEventListener('change', drawInc));
+  $('#iRound').addEventListener('change', () => $$('#iRows tr[data-sid]').forEach(updRow));
+  $('#iApply').onclick = () => {
+    const t = $('#iBT').value, v = $('#iBV').value; if (v === '') return toast('Increment value likhein', true);
+    $$('#iRows tr[data-sid]').forEach(tr => { const el = $(t === 'pct' ? '.ip' : '.ir', tr); el.value = v; el.dispatchEvent(new Event('input')); });
+  };
+  $('#iSave').onclick = async () => {
+    const head = D.heads.find(h => h.id === $('#iHead').value), month = $('#iMonth').value;
+    const rows = $$('#iRows tr[data-sid]').filter(tr => +tr.dataset.nf !== +tr.dataset.cur);
+    if (!rows.length) return toast('Koi increment nahi likha', true);
+    if (!await confirmBox(`${rows.length} students ki ${head.name} fee ${monthLabel(month)} se badal jayegi. Confirm?`, 'Save increment')) return;
+    for (const tr of rows) {
+      await DB.insert('student_rates', { student_id: tr.dataset.sid, head_id: head.id, amount: +tr.dataset.nf, effective_from: month });
+      await DB.insert('fee_increments', { student_id: tr.dataset.sid, head: head.name, old_amount: +tr.dataset.cur, new_amount: +tr.dataset.nf, effective_from: month, by: user.username, date: today() });
+    }
+    const cl = $('#iClass').value;
+    if (cl && $('#iCls').checked) {
+      const s = D.structure.find(x => x.class_id === cl && x.head_id === head.id), t = $('#iBT').value, v = parseFloat($('#iBV').value) || 0;
+      if (s && v) await DB.update('fee_structure', s.id, { amount: Math.max(0, roundTo(+s.amount + (t === 'pct' ? s.amount * v / 100 : v), +$('#iRound').value)) });
+    }
+    await DB.log(user.username, 'fee.increment', `${head.name} ${rows.length} students from ${month}`);
+    D = await Fees.data(); toast('Increment saved'); drawInc(); drawAmounts(); drawHist();
+  };
+  async function drawHist() {
+    const h = (await DB.list('fee_increments')).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 40);
+    const st = Object.fromEntries((await DB.list('students')).map(s => [s.id, s]));
+    $('#ihRows').innerHTML = h.map(x => `<tr><td data-label="Date">${fmtDate(x.date)}</td><td data-label="Student">${esc((st[x.student_id] || {}).name)}</td><td data-label="Head">${esc(x.head)}</td>
+      <td data-label="Old" class="num">${money(x.old_amount, '')}</td><td data-label="New" class="num">${money(x.new_amount, '')}</td><td data-label="Effective">${monthLabel(x.effective_from)}</td><td data-label="By">${esc(x.by)}</td></tr>`).join('')
+      || '<tr><td colspan="7" class="empty">Abhi koi increment nahi.</td></tr>';
+  }
+
+  /* ---------- Late fee ---------- */
+  $('#dueDay').value = S.due_day; $('#lateFee').value = S.late_fee;
+  $('#ruSave').onclick = async () => {
+    const s = await DB.getSettings(); s.due_day = Math.min(28, Math.max(1, parseInt($('#dueDay').value, 10) || 10)); s.late_fee = Math.max(0, parseFloat($('#lateFee').value) || 0);
+    await DB.saveSettings(s); toast('Saved');
+  };
+
+  drawAmounts(); drawHeads(); drawInc(); drawHist();
+})();
+</script>
+</body>
+</html>

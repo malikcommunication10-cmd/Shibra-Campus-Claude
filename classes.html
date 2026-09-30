@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classes & Sessions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="classes">Classes &amp; Sections</button>
+    <button data-tab="sessions">Sessions</button>
+  </div>
+
+  <section data-pane="classes">
+    <div class="card">
+      <div class="card-h">
+        <h2>Classes</h2>
+        <button class="btn needs-edit" id="addClass">+ Add class</button>
+      </div>
+      <p class="hint" style="margin:-6px 0 12px">Order se promotion chalta hai. "Last class" wale students session end par Passout hote hain.</p>
+      <div class="table-wrap"><table class="rt"><thead><tr>
+        <th>Order</th><th>Class</th><th>Sections (capacity)</th><th>Students</th><th></th>
+      </tr></thead><tbody id="classRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-pane="sessions" class="hide">
+    <div class="card">
+      <div class="card-h">
+        <h2>Academic sessions</h2>
+        <button class="btn needs-edit" id="addSession">+ Add session</button>
+      </div>
+      <div class="table-wrap"><table class="rt"><thead><tr>
+        <th>Session</th><th>Start</th><th>End</th><th>Status</th><th></th>
+      </tr></thead><tbody id="sessRows"></tbody></table></div>
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('classes', 'Classes & Sessions');
+  switchTabs();
+
+  /* ---------------- Classes ---------------- */
+  async function loadClasses() {
+    const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+    const sections = await DB.list('sections');
+    const stu = await DB.list('students', x => x.status === 'Active');
+    $('#classRows').innerHTML = classes.length ? classes.map(c => {
+      const secs = sections.filter(s => s.class_id === c.id);
+      return `<tr>
+        <td data-label="Order">${c.order}</td>
+        <td data-label="Class"><b>${esc(c.name)}</b> ${c.is_last ? '<span class="badge warn">Last class</span>' : ''}</td>
+        <td data-label="Sections"><div class="chips">${secs.map(s =>
+          `<span class="chip">${esc(s.name)} (${s.capacity})<button class="needs-edit" data-editsec="${s.id}" aria-label="Edit section ${esc(s.name)}">&#9998;</button></span>`).join('') || '<span class="muted">No section</span>'}</div></td>
+        <td data-label="Students">${stu.filter(x => x.class_id === c.id).length}</td>
+        <td class="act"><div class="actions needs-edit">
+          <button class="btn ghost sm" data-addsec="${c.id}">+ Section</button>
+          <button class="btn ghost sm" data-editcls="${c.id}">Edit</button>
+          <button class="btn danger sm" data-delcls="${c.id}">Delete</button></div></td>
+      </tr>`; }).join('') : '<tr><td colspan="5" class="empty">Abhi koi class nahi. "Add class" se shuru karein.</td></tr>';
+  }
+
+  function classForm(c = {}, nextOrder = 1) {
+    return `<div class="field"><label>Class name</label><input id="cName" value="${esc(c.name || '')}" placeholder="e.g. Class 6"></div>
+      <div class="field"><label>Order (promotion sequence)</label><input id="cOrder" type="number" min="1" value="${c.order ?? nextOrder}"></div>
+      <label class="check"><input type="checkbox" id="cLast" ${c.is_last ? 'checked' : ''}> Ye aakhri class hai (promote par Passout)</label>`;
+  }
+
+  async function saveClass(id) {
+    const name = $('#cName').value.trim(), order = parseInt($('#cOrder').value, 10);
+    if (!name || !order) { toast('Name aur order zaroori hain', true); return false; }
+    const all = await DB.list('classes');
+    if (all.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase())) { toast('Ye class pehle se maujood hai', true); return false; }
+    const data = { name, order, is_last: $('#cLast').checked };
+    if (data.is_last) for (const c of all) if (c.id !== id && c.is_last) await DB.update('classes', c.id, { is_last: false });
+    if (id) await DB.update('classes', id, data);
+    else { const c = await DB.insert('classes', data); await DB.insert('sections', { class_id: c.id, name: 'A', capacity: 40 }); }
+    await DB.log(ctx.user.username, id ? 'class.update' : 'class.add', name);
+    toast('Saved'); loadClasses();
+  }
+
+  $('#addClass').onclick = async () => {
+    const all = await DB.list('classes');
+    Modal.open({ title: 'Add class', body: classForm({}, all.length + 1), onSave: () => saveClass(null) });
+  };
+
+  function secForm(s = {}) {
+    return `<div class="row"><div class="field"><label>Section name</label><input id="sName" value="${esc(s.name || '')}" placeholder="A"></div>
+      <div class="field"><label>Capacity</label><input id="sCap" type="number" min="1" value="${s.capacity ?? 40}"></div></div>`;
+  }
+
+  $('#classRows').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const d = b.dataset;
+    if (d.editcls) {
+      const c = await DB.get('classes', d.editcls);
+      Modal.open({ title: 'Edit class', body: classForm(c), onSave: () => saveClass(c.id) });
+    }
+    if (d.addsec) {
+      Modal.open({ title: 'Add section', body: secForm(), onSave: async () => {
+        const name = $('#sName').value.trim().toUpperCase(), capacity = parseInt($('#sCap').value, 10);
+        if (!name || !capacity) { toast('Name aur capacity likhein', true); return false; }
+        const ex = await DB.list('sections', s => s.class_id === d.addsec && s.name === name);
+        if (ex.length) { toast('Ye section pehle se hai', true); return false; }
+        await DB.insert('sections', { class_id: d.addsec, name, capacity }); toast('Section added'); loadClasses();
+      } });
+    }
+    if (d.editsec) {
+      const s = await DB.get('sections', d.editsec);
+      Modal.open({ title: 'Edit section', body: secForm(s) + `<button type="button" class="btn danger sm" id="delSec">Delete this section</button>`,
+        onSave: async () => {
+          const name = $('#sName').value.trim().toUpperCase(), capacity = parseInt($('#sCap').value, 10);
+          if (!name || !capacity) { toast('Name aur capacity likhein', true); return false; }
+          await DB.update('sections', s.id, { name, capacity }); toast('Saved'); loadClasses();
+        } });
+      $('#delSec').onclick = async () => {
+        if ((await DB.list('students', x => x.section_id === s.id)).length) { toast('Is section mein students hain, delete nahi ho sakta', true); return; }
+        await DB.remove('sections', s.id); Modal.close(); toast('Section deleted'); loadClasses();
+      };
+    }
+    if (d.delcls) {
+      const c = await DB.get('classes', d.delcls);
+      if ((await DB.list('students', x => x.class_id === c.id)).length) return toast('Is class mein students hain, pehle unhein move karein', true);
+      if (await confirmBox(`"${c.name}" aur uske sections delete karein?`, 'Delete')) {
+        await DB.removeWhere('sections', s => s.class_id === c.id);
+        await DB.remove('classes', c.id); await DB.log(ctx.user.username, 'class.delete', c.name);
+        toast('Class deleted'); loadClasses();
+      }
+    }
+  });
+
+  /* ---------------- Sessions ---------------- */
+  async function loadSessions() {
+    const rows = (await DB.list('sessions')).sort((a, b) => b.start.localeCompare(a.start));
+    $('#sessRows').innerHTML = rows.map(s => `<tr>
+      <td data-label="Session"><b>${esc(s.name)}</b></td>
+      <td data-label="Start">${fmtDate(s.start)}</td><td data-label="End">${fmtDate(s.end)}</td>
+      <td data-label="Status">${s.is_active ? '<span class="badge ok">Active</span>' : '<span class="badge">Closed</span>'}</td>
+      <td class="act"><div class="actions needs-edit">
+        ${s.is_active ? '' : `<button class="btn ghost sm" data-act="${s.id}">Make active</button>`}
+        <button class="btn ghost sm" data-edit="${s.id}">Edit</button></div></td></tr>`).join('')
+      || '<tr><td colspan="5" class="empty">Koi session nahi.</td></tr>';
+  }
+
+  function sessForm(s = {}) {
+    const y = new Date().getFullYear();
+    return `<div class="field"><label>Session name</label><input id="sName2" value="${esc(s.name || `${y}-${String(y + 1).slice(2)}`)}"></div>
+      <div class="row"><div class="field"><label>Start date</label><input id="sStart" type="date" value="${s.start || y + '-04-01'}"></div>
+      <div class="field"><label>End date</label><input id="sEnd" type="date" value="${s.end || (y + 1) + '-03-31'}"></div></div>
+      ${s.id ? '' : '<label class="check"><input type="checkbox" id="sAct"> Isay active session bana dein</label>'}`;
+  }
+
+  async function saveSession(id) {
+    const name = $('#sName2').value.trim(), start = $('#sStart').value, end = $('#sEnd').value;
+    if (!name || !start || !end) { toast('Saari cheezein bharein', true); return false; }
+    if (end <= start) { toast('End date start se baad ki honi chahiye', true); return false; }
+    if (id) await DB.update('sessions', id, { name, start, end });
+    else {
+      const makeActive = $('#sAct').checked;
+      if (makeActive) for (const x of await DB.list('sessions')) await DB.update('sessions', x.id, { is_active: false });
+      const n = await DB.insert('sessions', { name, start, end, is_active: makeActive || (await DB.list('sessions')).length === 0 });
+    }
+    await DB.log(ctx.user.username, id ? 'session.update' : 'session.add', name);
+    toast('Saved'); loadSessions();
+  }
+
+  $('#addSession').onclick = () => Modal.open({ title: 'Add session', body: sessForm(), onSave: () => saveSession(null) });
+  $('#sessRows').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.edit) { const s = await DB.get('sessions', b.dataset.edit); Modal.open({ title: 'Edit session', body: sessForm(s), onSave: () => saveSession(s.id) }); }
+    if (b.dataset.act) {
+      if (!await confirmBox('Active session badalne se nayi fee isi session mein generate hogi. Continue?')) return;
+      for (const x of await DB.list('sessions')) await DB.update('sessions', x.id, { is_active: x.id === b.dataset.act });
+      localStorage.setItem('serp_cur_session', b.dataset.act); location.reload();
+    }
+  });
+
+  loadClasses(); loadSessions();
+})();
+</script>
+</body>
+</html>

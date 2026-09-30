@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fee Collection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="recv">Receive fee</button>
+    <button data-tab="gen" id="genTab">Generate fees</button>
+    <button data-tab="chal">Challans</button>
+    <button data-tab="day">Daybook</button>
+  </div>
+
+  <!-- ======= Receive ======= -->
+  <section data-pane="recv">
+    <div class="card">
+      <div class="field" style="max-width:480px;margin:0"><label>Student search</label><span id="pickBox"></span></div>
+    </div>
+    <div id="recvBox"></div>
+  </section>
+
+  <!-- ======= Generate ======= -->
+  <section data-pane="gen" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Bulk fee generation</h2></div>
+      <div class="row3">
+        <div class="field"><label for="gMonth">Fee month</label><input id="gMonth" type="month"></div>
+        <div class="field"><label for="gClass">Class</label><select id="gClass"></select></div>
+        <div class="field"><label for="gDue">Due date</label><input id="gDue" type="date"></div>
+      </div>
+      <label>Is challan mein monthly ke ilawa ye heads bhi lagayen</label>
+      <div class="doc-grid" id="gHeads" style="margin-bottom:12px"></div>
+      <button class="btn" id="gPrev">Preview</button>
+    </div>
+    <div class="card hide" id="gResult">
+      <div class="card-h"><h2>Preview</h2><button class="btn" id="gGo">Generate challans</button></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Student</th><th>Class</th><th>Fee heads</th><th class="num">Gross</th><th class="num">Discount</th><th class="num">Net</th></tr></thead><tbody id="gRows"></tbody></table></div>
+      <p class="hint" id="gNote"></p>
+    </div>
+  </section>
+
+  <!-- ======= Challans ======= -->
+  <section data-pane="chal" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <input id="cMonth" type="month"><select id="cClass"></select>
+        <select id="cStatus"><option value="">All status</option><option>Unpaid</option><option>Partial</option><option>Paid</option></select>
+        <input id="cSearch" type="search" placeholder="Search student / challan no">
+        <button class="btn ghost" id="cPrintAll">Print all</button>
+      </div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Challan</th><th>Student</th><th>Month</th><th class="num">Net</th><th class="num">Paid</th><th class="num">Due</th><th>Status</th><th></th></tr></thead><tbody id="cRows"></tbody></table></div>
+      <p class="hint" id="cNote"></p>
+    </div>
+  </section>
+
+  <!-- ======= Daybook ======= -->
+  <section data-pane="day" class="hide">
+    <div class="card">
+      <div class="toolbar"><input id="dDate" type="date"></div>
+      <div class="grid g-stats" id="dStats" style="margin-bottom:12px"></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Receipt</th><th>Received from</th><th>Type</th><th>Mode</th><th class="num">Amount</th><th></th></tr></thead><tbody id="dRows"></tbody></table></div>
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/fees.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('fee-collection', 'Fee Collection');
+  const { settings: S, user } = ctx;
+  switchTabs();
+  const canGen = ['admin', 'accountant'].includes(user.role);
+  if (!canGen) $('#genTab').classList.add('hide');
+  const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+  const cname = id => (classes.find(c => c.id === id) || {}).name || '-';
+  const clsOpts = '<option value="">All classes</option>' + classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  ['gClass', 'cClass'].forEach(id => $('#' + id).innerHTML = clsOpts);
+  const goTab = t => $(`.tabs button[data-tab="${t}"]`).click();
+
+  /* ================= RECEIVE ================= */
+  $('#pickBox').innerHTML = pickerHTML('pk');
+  bindPicker('pk', st => showStudent(st.id));
+  const TYPE_LABEL = { registration: 'Registration', admission: 'Admission', fee: 'Fee' };
+
+  async function showStudent(id) {
+    const st = await DB.get('students', id);
+    const challans = (await DB.list('challans', c => c.student_id === id)).sort((a, b) => a.month.localeCompare(b.month) || a.no.localeCompare(b.no));
+    const unpaid = challans.filter(c => outstanding(c) > 0.005);
+    const bal = r2(await DB.balance('student_id', id));
+    const other = Math.max(0, r2(bal - unpaid.reduce((a, c) => a + outstanding(c), 0)));
+    const lateOn = S.late_fee > 0;
+    const overdue = c => lateOn && !c.late_fee && c.due_date && today() > c.due_date;
+    $('#recvBox').innerHTML = `<div class="card">
+      <div class="card-h"><h2>${esc(st.name)}</h2><span class="badge">${esc(st.gr_no)}</span><span class="badge">${esc(cname(st.class_id))}</span>${sbadge(st.status)}</div>
+      <p class="muted">S/o ${esc(st.father)} &middot; ${esc(st.phone)}</p>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Item</th><th>Due date</th><th class="num">Net</th><th class="num">Paid</th><th class="num">Due</th><th>Late fee</th></tr></thead><tbody>
+        ${other > 0 ? `<tr><td data-label="Item">Previous / other dues (admission etc.)</td><td data-label="Due date"></td><td class="num" data-label="Net"></td><td class="num" data-label="Paid"></td><td class="num" data-label="Due">${money(other, '')}</td><td></td></tr>` : ''}
+        ${unpaid.map(c => `<tr><td data-label="Item"><b>${monthLabel(c.month)}</b> <span class="muted">${esc(c.no)}</span></td><td data-label="Due date">${fmtDate(c.due_date)}</td>
+          <td class="num" data-label="Net">${money(c.net, '')}</td><td class="num" data-label="Paid">${money(c.paid, '')}</td><td class="num" data-label="Due">${money(outstanding(c), '')}</td>
+          <td data-label="Late fee">${c.late_fee ? money(c.late_fee, '') + ' charged' : overdue(c) ? `<label class="check"><input type="checkbox" class="late" data-id="${c.id}"> + ${money(S.late_fee, S.currency)}</label>` : ''}</td></tr>`).join('')}
+        ${!other && !unpaid.length ? '<tr><td colspan="6" class="empty">Koi baqaya nahi.</td></tr>' : ''}</tbody></table></div>
+      ${bal > 0.005 || unpaid.length || other ? `
+      <div class="card" style="background:var(--bg);margin-top:12px">
+        <div class="row3">
+          <div class="field"><label for="rAmt">Amount received (${esc(S.currency)})</label><input id="rAmt" type="number" min="0" step="any"></div>
+          <div class="field"><label>Extra discount</label><span id="rdBox"></span></div>
+          <div class="field"><label for="rMode2">Mode</label><select id="rMode2"><option>Cash</option><option>Bank</option><option>Online</option></select></div>
+        </div>
+        <div class="row"><div class="field"><label for="rDate">Date</label><input id="rDate" type="date" value="${today()}"></div><div class="field"><label for="rRem">Remarks</label><input id="rRem"></div></div>
+        <div class="sum" id="rSum2"></div>
+        <div style="margin-top:12px"><button class="btn needs-edit" id="rGo">Receive &amp; print receipt</button></div>
+      </div>` : ''}</div>`;
+    if (!$('#rGo')) return;
+    $('#rdBox').innerHTML = Disc.html('xd');
+    let touched = false;
+    const lateSel = () => $$('.late').filter(c => c.checked).length * S.late_fee;
+    const totals = () => {
+      const due = r2(bal + lateSel()), d = Disc.amount('xd', due);
+      if (!touched) $('#rAmt').value = r2(due - d);
+      const r = parseFloat($('#rAmt').value) || 0;
+      $('#rSum2').innerHTML = `<div><span>Total due</span><span>${money(due, S.currency)}</span></div><div><span>Extra discount</span><span>- ${money(d, S.currency)}</span></div>
+        <div><span>Receiving</span><span>${money(r, S.currency)}</span></div><div class="tot"><span>Balance after</span><span>${money(due - d - r, S.currency)}</span></div>`;
+      return { due, d, r };
+    };
+    $('#rAmt').addEventListener('input', () => { touched = true; totals(); });
+    Disc.bind('xd', () => { touched = false; totals(); }); $$('.late').forEach(c => c.onchange = () => { touched = false; totals(); }); totals();
+
+    $('#rGo').onclick = async () => {
+      const { due, d, r } = totals();
+      const err = Disc.check('xd', due, ctx); if (err) return toast(err, true);
+      if (r < 0 || d < 0 || r + d <= 0) return toast('Amount likhein', true);
+      if (r + d > due + 0.005) return toast('Amount total dues se zyada hai', true);
+      const date = $('#rDate').value, mode = $('#rMode2').value; if (!date) return toast('Date likhein', true);
+      // 1) late fee charge
+      let lateTotal = 0;
+      for (const cb of $$('.late').filter(x => x.checked)) {
+        const c = unpaid.find(x => x.id === cb.dataset.id); c.late_fee = S.late_fee; lateTotal += S.late_fee;
+        await DB.update('challans', c.id, { late_fee: S.late_fee });
+        await DB.insert('ledger', { student_id: id, date, detail: `Late fee ${monthLabel(c.month)}`, ref: c.no, challan_id: c.id, head: 'Late Fee', kind: 'late', debit: S.late_fee, credit: 0 });
+      }
+      // 2) allocation: pehle other dues, phir purane challan
+      let left = r2(r + d); const alloc = [];
+      const toOther = Math.min(left, other); if (toOther > 0) { alloc.push({ detail: 'Previous / other dues', amount: toOther }); left = r2(left - toOther); }
+      for (const c of unpaid) { if (left <= 0) break; const a = Math.min(left, outstanding(c)); if (a <= 0) continue;
+        await DB.update('challans', c.id, { paid: r2((c.paid || 0) + a) }); alloc.push({ detail: `Fee ${monthLabel(c.month)} (${c.no})`, amount: a }); left = r2(left - a); }
+      const rcNo = nextReceiptNo(S);
+      if (d > 0) await DB.insert('ledger', { student_id: id, date, detail: 'Extra discount (approved)', ref: rcNo, head: 'Fee Discount', kind: 'discount', debit: 0, credit: d });
+      if (r > 0) await DB.insert('ledger', { student_id: id, date, detail: `Fee received (${mode})`, ref: rcNo, head: 'Fee', kind: 'payment', debit: 0, credit: r });
+      const rc = { no: rcNo, date, title: 'Fee Receipt', party: `${st.name} s/o ${st.father}`, ref: `${st.gr_no} / ${cname(st.class_id)}`, lines: alloc,
+        gross: r2(r + d), discount: d, net: r, received: r, balance: r2(due - d - r), mode, by: user.name, remarks: $('#rRem').value.trim() };
+      await DB.insert('receipts', { ...rc, type: 'fee', student_id: id });
+      await DB.log(user.username, 'fee.receive', `${rcNo} ${st.gr_no} ${r}`);
+      toast('Fee received'); showStudent(id); loadDay(); loadChallans();
+      Receipt.show(rc, S);
+    };
+  }
+
+  /* ================= GENERATE ================= */
+  let D = await Fees.data();
+  const nonMonthly = D.heads.filter(h => h.type !== 'monthly' && !(h.system && ['Registration', 'Admission'].includes(h.name)));
+  $('#gHeads').innerHTML = nonMonthly.map(h => `<label class="check"><input type="checkbox" value="${h.id}"> ${esc(h.name)} <span class="muted">(${h.type === 'yearly' ? 'yearly' : 'one time'})</span></label>`).join('') || '<span class="muted">Koi extra head nahi</span>';
+  const setDue = () => { const m = $('#gMonth').value; if (m) $('#gDue').value = `${m}-${pad(S.due_day, 2)}`; };
+  $('#gMonth').value = curMonth(); setDue(); $('#gMonth').addEventListener('change', setDue);
+  let plan = [];
+
+  $('#gPrev').onclick = async () => {
+    const month = $('#gMonth').value, cl = $('#gClass').value; if (!month || !$('#gDue').value) return toast('Month aur due date likhein', true);
+    if (!ctx.session) return toast('Pehle session set karein', true);
+    D = await Fees.data();
+    const extra = $$('#gHeads input:checked').map(i => i.value);
+    const students = (await DB.list('students', s => s.status === 'Active' && (!cl || s.class_id === cl))).sort((a, b) => a.gr_no.localeCompare(b.gr_no));
+    const ch = await DB.list('challans');
+    plan = students.map(s => ({ s, c: Fees.compute(D, s, month, extra, ctx.session, ch) }));
+    const ok = plan.filter(p => p.c.lines.length), skip = plan.length - ok.length;
+    $('#gRows').innerHTML = ok.map(p => `<tr><td data-label="Student"><b>${esc(p.s.name)}</b><br><span class="muted">${esc(p.s.gr_no)}</span></td><td data-label="Class">${esc(cname(p.s.class_id))}</td>
+      <td data-label="Fee heads">${p.c.lines.map(l => esc(l.head)).join(', ')}</td><td class="num" data-label="Gross">${money(p.c.gross, '')}</td>
+      <td class="num" data-label="Discount">${money(p.c.lineDisc + p.c.all, '')}</td><td class="num" data-label="Net"><b>${money(p.c.net, '')}</b></td></tr>`).join('')
+      + (ok.length ? `<tr><td colspan="3"><b>Total</b></td><td class="num">${money(ok.reduce((a, p) => a + p.c.gross, 0), '')}</td><td class="num">${money(ok.reduce((a, p) => a + p.c.lineDisc + p.c.all, 0), '')}</td><td class="num"><b>${money(ok.reduce((a, p) => a + p.c.net, 0), '')}</b></td></tr>` : '<tr><td colspan="6" class="empty">Generate karne ke liye kuch nahi.</td></tr>');
+    $('#gNote').textContent = `${ok.length} challans banenge. ${skip} students skip (fee amount 0 ya challan pehle se maujood).`;
+    $('#gGo').disabled = !ok.length; $('#gResult').classList.remove('hide');
+  };
+  $('#gGo').onclick = async () => {
+    const ok = plan.filter(p => p.c.lines.length), month = $('#gMonth').value, due = $('#gDue').value;
+    if (!await confirmBox(`${ok.length} students ke ${monthLabel(month)} ke challan generate karein?`, 'Generate')) return;
+    $('#gGo').disabled = true;
+    for (const p of ok) await Fees.create(p.s, month, due, ctx.session, p.c, user.username);
+    await DB.log(user.username, 'fee.generate', `${monthLabel(month)} ${ok.length} challans`);
+    toast(`${ok.length} challans generate hue`); $('#gResult').classList.add('hide'); $('#cMonth').value = month; loadChallans(); goTab('chal');
+  };
+
+  /* ================= CHALLANS ================= */
+  $('#cMonth').value = curMonth();
+  const status = c => { const o = outstanding(c); return o <= 0.005 ? 'Paid' : (c.paid > 0 ? 'Partial' : 'Unpaid'); };
+  let shown = [], stMap = {};
+  async function loadChallans() {
+    stMap = Object.fromEntries((await DB.list('students')).map(s => [s.id, s]));
+    const m = $('#cMonth').value, cl = $('#cClass').value, stt = $('#cStatus').value, q = $('#cSearch').value.toLowerCase();
+    shown = (await DB.list('challans', c => (!m || c.month === m) && (!cl || c.class_id === cl))).filter(c => (!stt || status(c) === stt) &&
+      (!q || (c.no + ' ' + (stMap[c.student_id] || {}).name + ' ' + (stMap[c.student_id] || {}).gr_no).toLowerCase().includes(q))).sort((a, b) => a.no.localeCompare(b.no));
+    $('#cRows').innerHTML = shown.map(c => { const s = stMap[c.student_id] || {}, stt = status(c);
+      return `<tr><td data-label="Challan">${esc(c.no)}</td><td data-label="Student"><b>${esc(s.name)}</b><br><span class="muted">${esc(s.gr_no)}</span></td><td data-label="Month">${monthLabel(c.month)}</td>
+        <td class="num" data-label="Net">${money(c.net, '')}</td><td class="num" data-label="Paid">${money(c.paid, '')}</td><td class="num" data-label="Due">${money(outstanding(c), '')}</td>
+        <td data-label="Status"><span class="badge ${stt === 'Paid' ? 'ok' : stt === 'Partial' ? 'warn' : 'bad'}">${stt}</span></td>
+        <td class="act"><div class="actions"><button class="btn ghost sm" data-print="${c.id}">Print</button>
+        ${canGen && !c.paid ? `<button class="btn danger sm needs-edit" data-cancel="${c.id}">Cancel</button>` : ''}</div></td></tr>`; }).join('')
+      || '<tr><td colspan="8" class="empty">Koi challan nahi.</td></tr>';
+    $('#cNote').textContent = `${shown.length} challans, due ${money(shown.reduce((a, c) => a + outstanding(c), 0), S.currency)}`;
+  }
+  ['cMonth', 'cClass', 'cStatus'].forEach(id => $('#' + id).addEventListener('change', loadChallans)); $('#cSearch').addEventListener('input', loadChallans);
+  async function printChallans(list) {
+    const led = await DB.list('ledger'), bal = {};
+    led.forEach(l => bal[l.student_id] = (bal[l.student_id] || 0) + (+l.debit || 0) - (+l.credit || 0));
+    const html = list.map((c, i) => { const s = stMap[c.student_id] || {}; return Fees.challanCard(c, s, cname(c.class_id), r2((bal[c.student_id] || 0) - outstanding(c)), S, i < list.length - 1); }).join('');
+    Modal.open({ title: 'Challan', body: html, wide: true, saveText: 'Print', onSave: () => { document.body.classList.add('printing'); window.print(); document.body.classList.remove('printing'); return false; } });
+  }
+  $('#cPrintAll').onclick = () => shown.length ? printChallans(shown) : toast('Koi challan nahi', true);
+  $('#cRows').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.print) printChallans([shown.find(c => c.id === b.dataset.print)]);
+    if (b.dataset.cancel) {
+      const c = shown.find(x => x.id === b.dataset.cancel);
+      if (!await confirmBox(`Challan ${c.no} cancel karein? Ledger entries bhi hat jayengi.`, 'Cancel challan')) return;
+      await DB.removeWhere('ledger', l => l.challan_id === c.id); await Fees.unmarkRules(c.rules_used); await DB.remove('challans', c.id);
+      await DB.log(user.username, 'challan.cancel', c.no); toast('Challan cancelled'); loadChallans();
+    }
+  });
+
+  /* ================= DAYBOOK ================= */
+  $('#dDate').value = today();
+  async function loadDay() {
+    const d = $('#dDate').value, rs = (await DB.list('receipts', r => r.date === d && (+r.received || 0) > 0)).sort((a, b) => a.no.localeCompare(b.no));
+    const by = m => rs.filter(r => r.mode === m).reduce((a, r) => a + (+r.received || 0), 0), tot = rs.reduce((a, r) => a + (+r.received || 0), 0);
+    $('#dStats').innerHTML = [['Total', tot], ['Cash', by('Cash')], ['Bank', by('Bank')], ['Online', by('Online')]].map(([l, v]) => `<div class="stat"><small>${l}</small><b>${money(v, S.currency)}</b></div>`).join('');
+    $('#dRows').innerHTML = rs.map(r => `<tr><td data-label="Receipt">${esc(r.no)}</td><td data-label="Received from">${esc(r.party)}</td><td data-label="Type">${TYPE_LABEL[r.type] || r.type}</td><td data-label="Mode">${esc(r.mode)}</td>
+      <td class="num" data-label="Amount">${money(r.received, '')}</td><td class="act"><button class="btn ghost sm" data-rc="${r.id}">View</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">Is din koi receipt nahi.</td></tr>';
+    $('#dRows').onclick = async e => { const b = e.target.closest('[data-rc]'); if (b) Receipt.show({ ...(await DB.get('receipts', b.dataset.rc)), title: 'Receipt (Duplicate)' }, S); };
+  }
+  $('#dDate').addEventListener('change', loadDay);
+  loadChallans(); loadDay();
+})();
+</script>
+</body>
+</html>

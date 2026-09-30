@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fee Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="led">Student ledger</button>
+    <button data-tab="def">Defaulters</button>
+  </div>
+
+  <section data-pane="led">
+    <div class="card"><div class="field" style="max-width:480px;margin:0"><label>Student search (Active, Inactive, Passout sab)</label><span id="pickBox"></span></div></div>
+    <div id="ledBox"></div>
+  </section>
+
+  <section data-pane="def" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <select id="fClass"></select>
+        <select id="fStatus"><option value="Active">Active students</option><option value="">All students</option><option>Inactive</option><option>Passout</option></select>
+        <input id="fMin" type="number" min="0" placeholder="Minimum dues (Rs.)">
+        <input id="fSearch" type="search" placeholder="Search">
+      </div>
+      <div class="grid g-stats" id="fStats" style="margin-bottom:12px"></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>GR No</th><th>Student</th><th>Class</th><th>Phone</th><th class="num">Dues</th><th class="num">Unpaid challans</th><th></th></tr></thead><tbody id="fRows"></tbody></table></div>
+      <div style="margin-top:10px"><button class="btn ghost" id="fPrint">Print list</button></div>
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/fees.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('fee-ledger', 'Fee Ledger');
+  const { settings: S } = ctx;
+  switchTabs();
+  const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+  const cname = id => (classes.find(c => c.id === id) || {}).name || '-';
+  $('#fClass').innerHTML = '<option value="">All classes</option>' + classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+  /* ---------- Student ledger ---------- */
+  $('#pickBox').innerHTML = pickerHTML('pk');
+  bindPicker('pk', s => showLedger(s.id));
+
+  async function showLedger(id) {
+    const st = await DB.get('students', id);
+    const rows = (await DB.list('ledger', l => l.student_id === id)).sort((a, b) => (a.date + (a.created_at || '')).localeCompare(b.date + (b.created_at || '')));
+    let bal = 0, dr = 0, cr = 0;
+    const body = rows.map(l => { bal += (+l.debit || 0) - (+l.credit || 0); dr += +l.debit || 0; cr += +l.credit || 0;
+      return `<tr><td data-label="Date">${fmtDate(l.date)}</td><td data-label="Detail">${esc(l.detail)}</td><td data-label="Ref">${esc(l.ref || '')}</td>
+        <td class="num" data-label="Debit">${l.debit ? money(l.debit, '') : ''}</td><td class="num" data-label="Credit">${l.credit ? money(l.credit, '') : ''}</td><td class="num" data-label="Balance"><b>${money(bal, '')}</b></td></tr>`; }).join('');
+    $('#ledBox').innerHTML = `<div class="card" id="stmt">
+      <div class="card-h"><h2>${esc(st.name)}</h2><span class="badge">${esc(st.gr_no)}</span><span class="badge">${esc(cname(st.class_id))}</span>${sbadge(st.status)}
+        <button class="btn ghost sm no-print" id="stPrint">Print statement</button>
+        ${bal > 0 && waLink(st.whatsapp || st.phone, '') ? `<a class="btn ghost sm no-print" target="_blank" rel="noopener" href="${waLink(st.whatsapp || st.phone, reminder(st, bal))}">WhatsApp reminder</a>` : ''}</div>
+      <p class="muted">S/o ${esc(st.father)} &middot; ${esc(st.phone)}</p>
+      <div class="grid g-stats" style="margin-bottom:12px">
+        <div class="stat"><small>Total charged</small><b>${money(dr, S.currency)}</b></div>
+        <div class="stat"><small>Total received + discount</small><b>${money(cr, S.currency)}</b></div>
+        <div class="stat"><small>Balance (dues)</small><b style="color:${bal > 0 ? 'var(--danger)' : 'var(--accent)'}">${money(bal, S.currency)}</b></div></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Date</th><th>Detail</th><th>Ref</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>
+        ${body || '<tr><td colspan="6" class="empty">Abhi koi entry nahi.</td></tr>'}</tbody></table></div></div>`;
+    $('#stPrint').onclick = () => {
+      Modal.open({ title: 'Fee statement', wide: true, saveText: 'Print', body: `<div class="receipt a4"><div class="rc-head"><b>${esc(S.school_name)}</b><div>${esc(S.address || '')} ${esc(S.phone || '')}</div><div class="rc-title">Fee Statement</div></div>
+        <div class="rc-meta"><span>${esc(st.name)} s/o ${esc(st.father)}</span><span>${esc(st.gr_no)} / ${esc(cname(st.class_id))}</span></div>
+        <table><thead><tr><th>Date</th><th>Detail</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>
+        ${(() => { let b = 0; return rows.map(l => { b += (+l.debit || 0) - (+l.credit || 0); return `<tr><td>${fmtDate(l.date)}</td><td>${esc(l.detail)}</td><td class="num">${l.debit ? money(l.debit, '') : ''}</td><td class="num">${l.credit ? money(l.credit, '') : ''}</td><td class="num">${money(b, '')}</td></tr>`; }).join(''); })()}
+        </tbody></table><div class="rc-meta"><span>Printed: ${fmtDate(today())}</span><b>Balance: ${money(bal, S.currency)}</b></div></div>`,
+        onSave: () => { document.body.classList.add('printing'); window.print(); document.body.classList.remove('printing'); return false; } });
+    };
+  }
+  const reminder = (s, due) => `Assalam o Alaikum. ${s.name} (${s.gr_no}, ${cname(s.class_id)}) ki fee ${money(due, S.currency)} baqi hai. Meherbani farma kar jald ada karein. - ${S.school_name}`;
+
+  /* ---------- Defaulters ---------- */
+  let students = [], dues = {}, unp = {};
+  async function loadDef() {
+    students = await DB.list('students'); dues = {}; unp = {};
+    (await DB.list('ledger')).forEach(l => { if (l.student_id) dues[l.student_id] = (dues[l.student_id] || 0) + (+l.debit || 0) - (+l.credit || 0); });
+    (await DB.list('challans')).forEach(c => { if (outstanding(c) > 0.005) unp[c.student_id] = (unp[c.student_id] || 0) + 1; });
+    drawDef();
+  }
+  let list = [];
+  function drawDef() {
+    const cl = $('#fClass').value, st = $('#fStatus').value, min = parseFloat($('#fMin').value) || 0.01, q = $('#fSearch').value.toLowerCase();
+    list = students.filter(s => (dues[s.id] || 0) >= min && (!cl || s.class_id === cl) && (!st || s.status === st) && (!q || [s.name, s.father, s.gr_no, s.phone].join(' ').toLowerCase().includes(q)))
+      .sort((a, b) => dues[b.id] - dues[a.id]);
+    const total = list.reduce((a, s) => a + dues[s.id], 0);
+    $('#fStats').innerHTML = `<div class="stat"><small>Defaulters</small><b>${list.length}</b></div><div class="stat"><small>Total dues</small><b>${money(total, S.currency)}</b></div>`;
+    $('#fRows').innerHTML = list.map(s => { const wa = waLink(s.whatsapp || s.phone, reminder(s, dues[s.id]));
+      return `<tr><td data-label="GR No">${esc(s.gr_no)}</td><td data-label="Student"><b>${esc(s.name)}</b><br><span class="muted">${esc(s.father)}</span></td><td data-label="Class">${esc(cname(s.class_id))}</td>
+        <td data-label="Phone">${esc(s.phone)}</td><td class="num" data-label="Dues"><b>${money(dues[s.id], '')}</b></td><td class="num" data-label="Unpaid challans">${unp[s.id] || 0}</td>
+        <td class="act"><div class="actions no-print"><button class="btn ghost sm" data-led="${s.id}">Ledger</button>${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">WhatsApp</a>` : ''}</div></td></tr>`; }).join('')
+      || '<tr><td colspan="7" class="empty">Koi defaulter nahi.</td></tr>';
+  }
+  ['fClass', 'fStatus'].forEach(id => $('#' + id).addEventListener('change', drawDef)); ['fMin', 'fSearch'].forEach(id => $('#' + id).addEventListener('input', drawDef));
+  $('#fRows').addEventListener('click', e => { const b = e.target.closest('[data-led]'); if (b) { $('.tabs button[data-tab="led"]').click(); showLedger(b.dataset.led); } });
+  $('#fPrint').onclick = () => {
+    Modal.open({ title: 'Defaulter list', wide: true, saveText: 'Print', body: `<div class="receipt a4"><div class="rc-head"><b>${esc(S.school_name)}</b><div class="rc-title">Defaulter List (${fmtDate(today())})</div></div>
+      <table><thead><tr><th>GR</th><th>Student</th><th>Class</th><th>Phone</th><th class="num">Dues</th></tr></thead><tbody>
+      ${list.map(s => `<tr><td>${esc(s.gr_no)}</td><td>${esc(s.name)} s/o ${esc(s.father)}</td><td>${esc(cname(s.class_id))}</td><td>${esc(s.phone)}</td><td class="num">${money(dues[s.id], '')}</td></tr>`).join('')}
+      <tr><td colspan="4"><b>Total</b></td><td class="num"><b>${money(list.reduce((a, s) => a + dues[s.id], 0), '')}</b></td></tr></tbody></table></div>`,
+      onSave: () => { document.body.classList.add('printing'); window.print(); document.body.classList.remove('printing'); return false; } });
+  };
+  loadDef();
+})();
+</script>
+</body>
+</html>

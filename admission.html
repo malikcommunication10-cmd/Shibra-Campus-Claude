@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admission</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="applicants">Applicants</button>
+    <button data-tab="register" class="needs-edit">New registration</button>
+    <button data-tab="enq">Enquiries</button>
+    <button data-tab="admit" class="needs-edit">Admit</button>
+  </div>
+
+  <!-- ============ Applicants ============ -->
+  <section data-pane="applicants">
+    <div class="card">
+      <div class="toolbar">
+        <input id="aSearch" type="search" placeholder="Search name, father, phone, reg no">
+        <select id="aStatus"><option value="">All status</option><option>Registered</option><option>Waiting</option><option>Admitted</option><option>Cancelled</option></select>
+      </div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Reg No</th><th>Applicant</th><th>Class</th><th>Phone</th><th>Status</th><th></th></tr></thead>
+      <tbody id="aRows"></tbody></table></div>
+      <p class="hint" id="aNote"></p>
+    </div>
+  </section>
+
+  <!-- ============ Registration ============ -->
+  <section data-pane="register" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Registration</h2><span class="badge" id="fromEnq"></span></div>
+      <div class="row">
+        <div class="field"><label for="rName">Applicant name *</label><input id="rName"></div>
+        <div class="field"><label for="rFather">Father / guardian name *</label><input id="rFather"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label for="rGender">Gender</label><select id="rGender"><option>Male</option><option>Female</option></select></div>
+        <div class="field"><label for="rPhone">Phone *</label><input id="rPhone" type="tel" inputmode="tel"></div>
+        <div class="field"><label for="rClass">Class applied for *</label><select id="rClass"></select></div>
+      </div>
+      <div class="field"><label for="rAddress">Address</label><input id="rAddress"></div>
+      <div class="card" style="background:var(--bg)">
+        <div class="row3">
+          <div class="field"><label for="rFee">Registration fee</label><input id="rFee" type="number" min="0"></div>
+          <div class="field"><label>Discount</label><span id="rDisc"></span></div>
+          <div class="field"><label for="rMode">Payment mode</label><select id="rMode"><option>Cash</option><option>Bank</option><option>Online</option></select></div>
+        </div>
+        <div class="sum" id="rSum"></div>
+        <div class="hint">Registration fee non-refundable hai aur admission fee mein adjust nahi hoti.</div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" id="rSave">Save &amp; receive fee</button></div>
+    </div>
+  </section>
+
+  <!-- ============ Enquiries ============ -->
+  <section data-pane="enq" class="hide">
+    <div class="card needs-edit">
+      <div class="card-h"><h2>New enquiry</h2></div>
+      <div class="row3">
+        <div class="field"><label for="eName">Child / parent name *</label><input id="eName"></div>
+        <div class="field"><label for="ePhone">Phone *</label><input id="ePhone" type="tel" inputmode="tel"></div>
+        <div class="field"><label for="eClass">Class interested</label><select id="eClass"></select></div>
+      </div>
+      <div class="field"><label for="eNote">Note</label><input id="eNote" placeholder="e.g. fee structure poocha, kal dobara ayenge"></div>
+      <button class="btn" id="eSave">Add enquiry</button>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Enquiry list</h2></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Date</th><th>Name</th><th>Phone</th><th>Class</th><th>Status</th><th></th></tr></thead>
+      <tbody id="eRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ Admit ============ -->
+  <section data-pane="admit" class="hide"><div id="admitBox"></div></section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('admission', 'Admission');
+  const { settings: S, user } = ctx;
+  switchTabs();
+  const goTab = t => $(`.tabs button[data-tab="${t}"]`).click();
+  const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+  const cname = id => (classes.find(c => c.id === id) || {}).name || '-';
+  const opts = (sel) => classes.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  ['rClass', 'eClass'].forEach(id => $('#' + id).innerHTML = opts());
+  $('#rDisc').innerHTML = Disc.html('rd');
+  $('#rFee').value = S.reg_fee_default;
+  $('#rClass').addEventListener('change', async () => { $('#rFee').value = await classFee($('#rClass').value, 'Registration', S.reg_fee_default); regSummary(); });
+  classFee($('#rClass').value, 'Registration', S.reg_fee_default).then(v => { $('#rFee').value = v; regSummary(); });
+  let fromEnquiry = null;
+
+  /* ---------------- Registration ---------------- */
+  function regSummary() {
+    const g = parseFloat($('#rFee').value) || 0, d = Disc.amount('rd', g);
+    $('#rSum').innerHTML = `<div><span>Gross</span><span>${money(g, S.currency)}</span></div>
+      <div><span>Discount</span><span>- ${money(d, S.currency)}</span></div>
+      <div class="tot"><span>Net payable</span><span>${money(g - d, S.currency)}</span></div>`;
+  }
+  $('#rFee').addEventListener('input', regSummary); Disc.bind('rd', regSummary); regSummary();
+
+  $('#rSave').onclick = async () => {
+    const v = id => $('#' + id).value.trim();
+    if (!v('rName') || !v('rFather') || !v('rPhone')) return toast('Name, father aur phone zaroori hain', true);
+    const gross = parseFloat($('#rFee').value) || 0, disc = Disc.amount('rd', gross), net = gross - disc;
+    const err = Disc.check('rd', gross, ctx); if (err) return toast(err, true);
+    const apps = await DB.list('applicants');
+    const dup = apps.find(a => a.status !== 'Cancelled' && a.name.toLowerCase() === v('rName').toLowerCase() && a.father.toLowerCase() === v('rFather').toLowerCase() && a.phone === v('rPhone'));
+    if (dup) return toast(`Ye applicant pehle se registered hai (${dup.reg_no}). Registration fee sirf ek dafa lagti hai.`, true);
+
+    const yr = new Date().getFullYear();
+    const reg_no = `${S.reg_prefix}-${yr}-${pad(DB.nextNo('reg' + yr), 3)}`;
+    const app = await DB.insert('applicants', {
+      reg_no, name: v('rName'), father: v('rFather'), gender: v('rGender'), phone: v('rPhone'), address: v('rAddress'),
+      class_id: $('#rClass').value, session_id: ctx.session && ctx.session.id, reg_date: today(),
+      reg_gross: gross, reg_discount: disc, reg_net: net, status: 'Registered', enquiry_id: fromEnquiry
+    });
+    const rcNo = net > 0 ? nextReceiptNo(S) : '-';
+    const L = (debit, credit, detail) => DB.insert('ledger', { applicant_id: app.id, date: today(), detail, ref: rcNo !== '-' ? rcNo : reg_no, head: 'Registration', debit, credit });
+    if (gross > 0) await L(gross, 0, 'Registration fee');
+    if (disc > 0) await L(0, disc, 'Discount on registration fee');
+    if (net > 0) await L(0, net, `Received (${$('#rMode').value})`);
+    let rc = null;
+    if (net > 0) {
+      rc = { no: rcNo, date: today(), title: 'Registration Fee Receipt', party: `${app.name} s/o ${app.father}`, ref: `${reg_no} / ${cname(app.class_id)}`,
+        lines: [{ detail: 'Registration fee', amount: gross }], gross, discount: disc, net, received: net, balance: 0, mode: $('#rMode').value, by: user.name };
+      await DB.insert('receipts', { ...rc, type: 'registration', applicant_id: app.id });
+    }
+    if (fromEnquiry) await DB.update('enquiries', fromEnquiry, { status: 'Registered' });
+    await DB.log(user.username, 'registration', reg_no);
+    fromEnquiry = null; $('#fromEnq').textContent = '';
+    ['rName', 'rFather', 'rPhone', 'rAddress'].forEach(id => $('#' + id).value = '');
+    $('#rdV').value = ''; regSummary();
+    toast(`Registered: ${reg_no}`);
+    loadApplicants(); loadEnquiries(); goTab('applicants');
+    if (rc) Receipt.show(rc, S);
+  };
+
+  /* ---------------- Applicants ---------------- */
+  let apps = [];
+  async function loadApplicants() {
+    apps = (await DB.list('applicants')).sort((a, b) => b.reg_no.localeCompare(a.reg_no));
+    renderApplicants();
+  }
+  function renderApplicants() {
+    const q = $('#aSearch').value.toLowerCase(), st = $('#aStatus').value;
+    const rows = apps.filter(a => (!st || a.status === st) && (!q || [a.name, a.father, a.phone, a.reg_no].join(' ').toLowerCase().includes(q)));
+    $('#aRows').innerHTML = rows.map(a => `<tr>
+      <td data-label="Reg No">${esc(a.reg_no)}</td>
+      <td data-label="Applicant"><b>${esc(a.name)}</b><br><span class="muted">${esc(a.father)}</span></td>
+      <td data-label="Class">${esc(cname(a.class_id))}</td><td data-label="Phone">${esc(a.phone)}</td>
+      <td data-label="Status">${sbadge(a.status)}</td>
+      <td class="act"><div class="actions">
+        ${['Registered', 'Waiting'].includes(a.status) ? `<button class="btn sm needs-edit" data-admit="${a.id}">Admit</button>` : ''}
+        ${a.reg_net > 0 ? `<button class="btn ghost sm" data-rc="${a.id}">Receipt</button>` : ''}
+        ${a.status !== 'Admitted' ? `<button class="btn ghost sm needs-edit" data-st="${a.id}">Status</button>` : ''}</div></td></tr>`).join('')
+      || '<tr><td colspan="6" class="empty">Koi applicant nahi. "New registration" se shuru karein.</td></tr>';
+    $('#aNote').textContent = `${rows.length} applicants`;
+  }
+  $('#aSearch').oninput = renderApplicants; $('#aStatus').onchange = renderApplicants;
+
+  $('#aRows').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.admit) openAdmit(apps.find(a => a.id === b.dataset.admit));
+    if (b.dataset.rc) {
+      const r = (await DB.list('receipts', x => x.applicant_id === b.dataset.rc && x.type === 'registration'))[0];
+      if (r) Receipt.show({ ...r, title: 'Registration Fee Receipt (Duplicate)' }, S);
+    }
+    if (b.dataset.st) {
+      const a = apps.find(x => x.id === b.dataset.st);
+      Modal.open({ title: `Status: ${a.name}`, body: `<div class="field"><label>Status</label><select id="stSel">
+        ${['Registered', 'Waiting', 'Cancelled'].map(x => `<option ${x === a.status ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+        <div class="hint">${S.registration_refundable ? 'Registration fee refund abhi manual hai.' : 'Cancel karne par bhi registration fee non-refundable rahegi.'}</div>`,
+        onSave: async () => { await DB.update('applicants', a.id, { status: $('#stSel').value }); loadApplicants(); toast('Saved'); } });
+    }
+  });
+
+  /* ---------------- Enquiries ---------------- */
+  async function loadEnquiries() {
+    const rows = (await DB.list('enquiries')).sort((a, b) => b.date.localeCompare(a.date));
+    $('#eRows').innerHTML = rows.map(q => `<tr>
+      <td data-label="Date">${fmtDate(q.date)}</td><td data-label="Name"><b>${esc(q.name)}</b><br><span class="muted">${esc(q.note || '')}</span></td>
+      <td data-label="Phone">${esc(q.phone)}</td><td data-label="Class">${esc(cname(q.class_id))}</td><td data-label="Status">${sbadge(q.status)}</td>
+      <td class="act"><div class="actions needs-edit">
+        ${q.status === 'Open' ? `<button class="btn sm" data-reg="${q.id}">Register</button><button class="btn ghost sm" data-close="${q.id}">Close</button>` : ''}
+        <button class="btn danger sm" data-del="${q.id}">Delete</button></div></td></tr>`).join('')
+      || '<tr><td colspan="6" class="empty">Koi enquiry nahi.</td></tr>';
+  }
+  $('#eSave').onclick = async () => {
+    const name = $('#eName').value.trim(), phone = $('#ePhone').value.trim();
+    if (!name || !phone) return toast('Name aur phone zaroori hain', true);
+    await DB.insert('enquiries', { name, phone, class_id: $('#eClass').value, note: $('#eNote').value.trim(), date: today(), status: 'Open' });
+    ['eName', 'ePhone', 'eNote'].forEach(id => $('#' + id).value = ''); toast('Enquiry saved'); loadEnquiries();
+  };
+  $('#eRows').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.reg) {
+      const q = await DB.get('enquiries', b.dataset.reg);
+      $('#rName').value = q.name; $('#rPhone').value = q.phone; $('#rClass').value = q.class_id;
+      fromEnquiry = q.id; $('#fromEnq').textContent = 'From enquiry'; goTab('register');
+    }
+    if (b.dataset.close) { await DB.update('enquiries', b.dataset.close, { status: 'Closed' }); loadEnquiries(); }
+    if (b.dataset.del && await confirmBox('Enquiry delete karein?', 'Delete')) { await DB.remove('enquiries', b.dataset.del); loadEnquiries(); }
+  });
+
+  /* ---------------- Admit ---------------- */
+  const DOCS = ['B-Form / Birth certificate', 'Father CNIC copy', 'Previous school certificate / SLC', 'Passport size photos', 'Vaccination card'];
+  $('#admitBox').innerHTML = '<div class="card empty">Applicants tab mein se kisi registered applicant par "Admit" dabayen.</div>';
+
+  async function openAdmit(a) {
+    const sections = await DB.list('sections');
+    const students = (await DB.list('students', s => s.status === 'Active')).sort((x, y) => x.name.localeCompare(y.name));
+    const fee = await classFee(a.class_id, 'Admission', S.adm_fee_default);
+    $('#admitBox').innerHTML = `<div class="card">
+      <div class="card-h"><h2>Admit: ${esc(a.name)}</h2><span class="badge">${esc(a.reg_no)}</span></div>
+      <div class="row"><div class="field"><label for="dName">Student name *</label><input id="dName" value="${esc(a.name)}"></div>
+        <div class="field"><label for="dFather">Father / guardian *</label><input id="dFather" value="${esc(a.father)}"></div></div>
+      <div class="row3">
+        <div class="field"><label for="dGender">Gender</label><select id="dGender"><option ${a.gender === 'Male' ? 'selected' : ''}>Male</option><option ${a.gender === 'Female' ? 'selected' : ''}>Female</option></select></div>
+        <div class="field"><label for="dDob">Date of birth</label><input id="dDob" type="date"></div>
+        <div class="field"><label for="dBform">B-Form no</label><input id="dBform" inputmode="numeric"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label for="dCnic">Guardian CNIC</label><input id="dCnic" inputmode="numeric"></div>
+        <div class="field"><label for="dPhone">Phone *</label><input id="dPhone" type="tel" value="${esc(a.phone)}"></div>
+        <div class="field"><label for="dWa">WhatsApp</label><input id="dWa" type="tel" value="${esc(a.phone)}"></div>
+      </div>
+      <div class="field"><label for="dAddr">Address</label><input id="dAddr" value="${esc(a.address || '')}"></div>
+      <div class="row3">
+        <div class="field"><label for="dClass">Class *</label><select id="dClass">${opts(a.class_id)}</select></div>
+        <div class="field"><label for="dSec">Section *</label><select id="dSec"></select></div>
+        <div class="field"><label for="dDate">Admission date</label><input id="dDate" type="date" value="${today()}"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="dPrev">Previous school</label><input id="dPrev"></div>
+        <div class="field"><label for="dSib">Sibling (already studying here)</label><select id="dSib"><option value="">None</option>
+          ${students.map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.gr_no)})</option>`).join('')}</select>
+          <div class="hint">Sibling discount student profile ke Discounts tab mein lagayen.</div></div>
+      </div>
+      <label>Documents received</label>
+      <div class="doc-grid" style="margin-bottom:14px">${DOCS.map((d, i) => `<label class="check"><input type="checkbox" data-doc="${esc(d)}"> ${d}</label>`).join('')}</div>
+      <div class="card" style="background:var(--bg)">
+        <div class="row3">
+          <div class="field"><label for="dFee">Admission fee</label><input id="dFee" type="number" min="0" value="${fee}"></div>
+          <div class="field"><label>Discount</label><span id="dDisc"></span></div>
+          <div class="field"><label for="dRecv">Received now</label><input id="dRecv" type="number" min="0"></div>
+        </div>
+        <div class="row"><div class="field"><label for="dMode">Payment mode</label><select id="dMode"><option>Cash</option><option>Bank</option><option>Online</option></select></div><div></div></div>
+        <div class="sum" id="dSum"></div>
+        <div class="hint">Pehla monthly challan Phase 3 (Fee Collection) se banega. Baqaya ledger mein rahega.</div>
+      </div>
+      <div style="margin-top:14px" class="actions"><button class="btn" id="dSave">Confirm admission</button><button class="btn ghost" id="dCancel">Cancel</button></div></div>`;
+    $('#dDisc').innerHTML = Disc.html('dd');
+
+    const fillSec = () => {
+      const cid = $('#dClass').value, ss = sections.filter(s => s.class_id === cid);
+      $('#dSec').innerHTML = ss.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('') || '<option value="">No section</option>';
+    };
+    $('#dClass').onchange = async () => { fillSec(); $('#dFee').value = await classFee($('#dClass').value, 'Admission', S.adm_fee_default); sum(); };
+    fillSec();
+    let recvTouched = false;
+    const sum = () => {
+      const g = parseFloat($('#dFee').value) || 0, d = Disc.amount('dd', g), n = g - d;
+      if (!recvTouched) $('#dRecv').value = n;
+      const r = parseFloat($('#dRecv').value) || 0;
+      $('#dSum').innerHTML = `<div><span>Gross</span><span>${money(g, S.currency)}</span></div><div><span>Discount</span><span>- ${money(d, S.currency)}</span></div>
+        <div class="tot"><span>Net payable</span><span>${money(n, S.currency)}</span></div><div><span>Balance after receiving</span><span>${money(n - r, S.currency)}</span></div>`;
+    };
+    $('#dRecv').addEventListener('input', () => { recvTouched = true; sum(); });
+    $('#dFee').addEventListener('input', sum); Disc.bind('dd', sum); sum();
+    $('#dCancel').onclick = () => { $('#admitBox').innerHTML = ''; goTab('applicants'); };
+
+    $('#dSave').onclick = async () => {
+      const v = id => $('#' + id).value.trim();
+      if (!v('dName') || !v('dFather') || !v('dPhone') || !$('#dClass').value) return toast('Name, father, phone aur class zaroori hain', true);
+      const gross = parseFloat($('#dFee').value) || 0, disc = Disc.amount('dd', gross), net = gross - disc, recv = parseFloat($('#dRecv').value) || 0;
+      if (recv > net) return toast('Received amount net se zyada nahi ho sakta', true);
+      const err = Disc.check('dd', gross, ctx); if (err) return toast(err, true);
+      const secId = $('#dSec').value, mode = $('#dMode').value, adDate = v('dDate');
+      if (secId) {
+        const sec = sections.find(s => s.id === secId);
+        const cnt = (await DB.list('students', s => s.section_id === secId && s.status === 'Active')).length;
+        if (cnt >= sec.capacity && !await confirmBox(`Section ${sec.name} full hai (${cnt}/${sec.capacity}). Phir bhi admit karein?`, 'Admit')) return;
+      }
+      const docs = {}; $$('[data-doc]').forEach(c => docs[c.dataset.doc] = c.checked);
+      const gr_no = `${S.gr_prefix}-${pad(DB.nextNo('gr'), 4)}`;
+      const stu = await DB.insert('students', {
+        gr_no, reg_no: a.reg_no, applicant_id: a.id, name: v('dName'), father: v('dFather'), gender: v('dGender'), dob: v('dDob'), b_form: v('dBform'),
+        cnic: v('dCnic'), phone: v('dPhone'), whatsapp: v('dWa'), address: v('dAddr'), class_id: $('#dClass').value, section_id: secId,
+        session_id: ctx.session && ctx.session.id, admission_date: adDate, prev_school: v('dPrev'), sibling_of: v('dSib') || null,
+        docs, status: 'Active', status_history: [{ status: 'Active', date: adDate, reason: 'Admission' }]
+      });
+      await DB.update('applicants', a.id, { status: 'Admitted', student_id: stu.id });
+      // registration ke ledger rows ab student ke naam par bhi
+      for (const l of await DB.list('ledger', x => x.applicant_id === a.id)) await DB.update('ledger', l.id, { student_id: stu.id });
+      const rcNo = recv > 0 ? nextReceiptNo(S) : gr_no;
+      const L = (debit, credit, detail) => DB.insert('ledger', { student_id: stu.id, applicant_id: a.id, date: adDate, detail, ref: rcNo, head: 'Admission', debit, credit });
+      if (gross > 0) await L(gross, 0, 'Admission fee');
+      if (disc > 0) await L(0, disc, 'Discount on admission fee');
+      if (recv > 0) await L(0, recv, `Received (${mode})`);
+      await DB.log(user.username, 'admission', gr_no);
+      $('#admitBox').innerHTML = ''; loadApplicants(); goTab('applicants');
+      toast(`Admitted. GR No: ${gr_no}`);
+      if (recv > 0) {
+        const rc = { no: rcNo, date: adDate, title: 'Admission Fee Receipt', party: `${stu.name} s/o ${stu.father}`, ref: `${gr_no} / ${cname(stu.class_id)}`,
+          lines: [{ detail: 'Admission fee', amount: gross }], gross, discount: disc, net, received: recv, balance: net - recv, mode, by: user.name };
+        await DB.insert('receipts', { ...rc, type: 'admission', student_id: stu.id });
+        Receipt.show(rc, S);
+      }
+    };
+    goTab('admit');
+  }
+
+  loadApplicants(); loadEnquiries();
+})();
+</script>
+</body>
+</html>

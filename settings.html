@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="school">School</button>
+    <button data-tab="rules">Numbering &amp; Rules</button>
+    <button data-tab="users">Users &amp; Roles</button>
+    <button data-tab="backup">Backup</button>
+  </div>
+
+  <section data-pane="school">
+    <div class="card">
+      <div class="card-h"><h2>School information</h2></div>
+      <div class="field"><label for="school_name">School name</label><input id="school_name"></div>
+      <div class="field"><label for="address">Address</label><textarea id="address" rows="2"></textarea></div>
+      <div class="row">
+        <div class="field"><label for="phone">Phone</label><input id="phone" type="tel"></div>
+        <div class="field"><label for="email">Email</label><input id="email" type="email"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="principal">Principal name</label><input id="principal"></div>
+        <div class="field"><label for="currency">Currency label</label><input id="currency"></div>
+      </div>
+      <button class="btn needs-edit" data-save>Save changes</button>
+    </div>
+  </section>
+
+  <section data-pane="rules" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Numbering</h2></div>
+      <div class="row3">
+        <div class="field"><label for="reg_prefix">Registration no prefix</label><input id="reg_prefix"><div class="hint" id="regEx"></div></div>
+        <div class="field"><label for="gr_prefix">GR / Student ID prefix</label><input id="gr_prefix"><div class="hint" id="grEx"></div></div>
+        <div class="field"><label for="receipt_prefix">Receipt prefix</label><input id="receipt_prefix"><div class="hint" id="rcEx"></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Rules</h2></div>
+      <div class="row">
+        <div class="field"><label for="clerk_discount_limit">Clerk discount limit (%)</label><input id="clerk_discount_limit" type="number" min="0" max="100">
+          <div class="hint">Isse zyada discount par Principal/Admin approval chahiye.</div></div>
+        <div class="field"><label for="rounding">Fee rounding</label>
+          <select id="rounding"><option value="1">Nearest Rs. 1</option><option value="10">Nearest Rs. 10</option><option value="50">Nearest Rs. 50</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="reg_fee_default">Registration fee (default)</label><input id="reg_fee_default" type="number" min="0"></div>
+        <div class="field"><label for="adm_fee_default">Admission fee (default)</label><input id="adm_fee_default" type="number" min="0"><div class="hint">Phase 3 mein class-wise fee structure aane par ye sirf backup default rahegi.</div></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="receipt_size">Receipt size</label>
+          <select id="receipt_size"><option>A5</option><option>A4</option><option>Thermal</option></select></div>
+        <div class="field"><label>Registration fee</label>
+          <label class="check"><input type="checkbox" id="registration_refundable"> Refundable (default: non-refundable)</label></div>
+      </div>
+      <button class="btn needs-edit" data-save>Save changes</button>
+    </div>
+  </section>
+
+  <section data-pane="users" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Users</h2><button class="btn needs-edit" id="addUser">+ Add user</button></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
+      <tbody id="userRows"></tbody></table></div>
+      <p class="hint">Admin: sab kuch. Principal: sirf dekhna. Accountant: fee, books, accounts. Clerk: admission, fee receive, sale.</p>
+    </div>
+  </section>
+
+  <section data-pane="backup" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Backup &amp; restore</h2></div>
+      <div class="notice">Abhi data sirf is browser mein hai. Regular backup lein. Supabase link hone ke baad ye khud server par rahega.</div>
+      <div class="actions">
+        <button class="btn" id="exportBtn">Download backup</button>
+        <button class="btn ghost needs-edit" id="importBtn">Restore from file</button>
+        <button class="btn danger needs-edit" id="resetBtn">Reset to demo data</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json" class="hide">
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('settings', 'Settings');
+  switchTabs();
+  if (ctx.user.role !== 'admin' && !ctx.readonly) { location.replace('dashboard.html'); return; }
+
+  /* ---- settings form ---- */
+  const keys = ['school_name', 'address', 'phone', 'email', 'principal', 'currency', 'reg_prefix', 'gr_prefix', 'receipt_prefix', 'clerk_discount_limit', 'rounding', 'receipt_size', 'reg_fee_default', 'adm_fee_default'];
+  const y = new Date().getFullYear();
+  function fill(s) {
+    keys.forEach(k => $('#' + k).value = s[k]);
+    $('#registration_refundable').checked = !!s.registration_refundable;
+    examples();
+  }
+  function examples() {
+    $('#regEx').textContent = `e.g. ${$('#reg_prefix').value}-${y}-001`;
+    $('#grEx').textContent = `e.g. ${$('#gr_prefix').value}-0001`;
+    $('#rcEx').textContent = `e.g. ${$('#receipt_prefix').value}-000001`;
+  }
+  ['reg_prefix', 'gr_prefix', 'receipt_prefix'].forEach(k => $('#' + k).addEventListener('input', examples));
+  fill(ctx.settings);
+
+  $$('[data-save]').forEach(b => b.onclick = async () => {
+    const s = await DB.getSettings();
+    keys.forEach(k => { const v = $('#' + k).value.trim(); s[k] = ['clerk_discount_limit', 'rounding', 'reg_fee_default', 'adm_fee_default'].includes(k) ? Number(v) || 0 : v; });
+    s.registration_refundable = $('#registration_refundable').checked;
+    if (!s.school_name) return toast('School name zaroori hai', true);
+    await DB.saveSettings(s); await DB.log(ctx.user.username, 'settings.save', '');
+    toast('Saved'); $('.brand b').textContent = s.school_name;
+  });
+
+  /* ---- users ---- */
+  async function loadUsers() {
+    const rows = await DB.list('users');
+    $('#userRows').innerHTML = rows.map(u => `<tr>
+      <td data-label="Name"><b>${esc(u.name)}</b></td><td data-label="Username">${esc(u.username)}</td>
+      <td data-label="Role">${ROLES[u.role].label}</td>
+      <td data-label="Status">${u.active ? '<span class="badge ok">Active</span>' : '<span class="badge bad">Disabled</span>'}</td>
+      <td class="act"><div class="actions needs-edit"><button class="btn ghost sm" data-edit="${u.id}">Edit</button></div></td></tr>`).join('');
+  }
+  function userForm(u = {}) {
+    return `<div class="field"><label>Full name</label><input id="uName" value="${esc(u.name || '')}"></div>
+      <div class="row"><div class="field"><label>Username</label><input id="uUser" value="${esc(u.username || '')}" autocapitalize="off"></div>
+      <div class="field"><label>Role</label><select id="uRole">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${r.label}</option>`).join('')}</select></div></div>
+      <div class="field"><label>${u.id ? 'New password (khali chorein to wahi rahega)' : 'Password'}</label><input id="uPass" type="text" autocomplete="off"></div>
+      ${u.id ? `<label class="check"><input type="checkbox" id="uActive" ${u.active ? 'checked' : ''}> Active</label>` : ''}`;
+  }
+  async function saveUser(id) {
+    const name = $('#uName').value.trim(), username = $('#uUser').value.trim().toLowerCase(), role = $('#uRole').value, pw = $('#uPass').value;
+    if (!name || !username) { toast('Name aur username zaroori hain', true); return false; }
+    if (!id && pw.length < 6) { toast('Password kam az kam 6 characters ka ho', true); return false; }
+    if (id && pw && pw.length < 6) { toast('Password kam az kam 6 characters ka ho', true); return false; }
+    const all = await DB.list('users');
+    if (all.some(u => u.id !== id && u.username === username)) { toast('Ye username pehle se hai', true); return false; }
+    const data = { name, username, role };
+    if (pw) data.pass_hash = await DB.sha(pw);
+    if (id) {
+      const active = $('#uActive').checked;
+      const admins = all.filter(u => u.role === 'admin' && u.active && u.id !== id).length;
+      if ((!active || role !== 'admin') && all.find(u => u.id === id).role === 'admin' && admins === 0) { toast('Kam az kam ek active Admin lazmi hai', true); return false; }
+      data.active = active;
+      await DB.update('users', id, data);
+      if (pw && id === ctx.user.id) localStorage.setItem('serp_pw_changed', '1');
+      if (pw && ctx.user.username === 'admin') localStorage.setItem('serp_pw_changed', '1');
+    } else await DB.insert('users', { ...data, active: true });
+    await DB.log(ctx.user.username, id ? 'user.update' : 'user.add', username);
+    toast('Saved'); loadUsers();
+  }
+  $('#addUser').onclick = () => Modal.open({ title: 'Add user', body: userForm(), onSave: () => saveUser(null) });
+  $('#userRows').addEventListener('click', async e => {
+    const b = e.target.closest('[data-edit]'); if (!b) return;
+    const u = await DB.get('users', b.dataset.edit);
+    Modal.open({ title: 'Edit user', body: userForm(u), onSave: () => saveUser(u.id) });
+  });
+  loadUsers();
+
+  /* ---- backup ---- */
+  $('#exportBtn').onclick = async () => downloadJSON(await DB.exportAll(), `school-erp-backup-${today()}.json`);
+  $('#importBtn').onclick = () => $('#importFile').click();
+  $('#importFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const obj = JSON.parse(await f.text());
+      if (!await confirmBox('Maujooda data replace ho jayega. Restore karein?', 'Restore')) return;
+      await DB.importAll(obj); toast('Restored'); setTimeout(() => location.href = 'index.html', 800);
+    } catch (err) { toast(err.message || 'File sahi nahi hai', true); }
+    e.target.value = '';
+  };
+  $('#resetBtn').onclick = async () => {
+    if (!await confirmBox('Saara data delete ho kar demo data wapas aa jayega. Pehle backup le lein. Continue?', 'Reset')) return;
+    localStorage.removeItem('serp_auth'); localStorage.removeItem('serp_pw_changed'); localStorage.removeItem('serp_cur_session');
+    await DB.resetAll(); location.href = 'index.html';
+  };
+})();
+</script>
+</body>
+</html>

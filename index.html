@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login - School ERP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="login">
+  <section class="login-side">
+    <h1 id="schoolName">School ERP</h1>
+    <p>Admission, fee, book store aur accounts ek jagah. Mobile aur computer dono par.</p>
+    <div class="demo">
+      Demo logins (Settings mein badal lein):<br>
+      <code>admin</code> / <code>admin123</code><br>
+      <code>accountant</code> / <code>acc123</code> &nbsp; <code>clerk</code> / <code>clerk123</code><br>
+      <code>principal</code> / <code>principal123</code> (sirf dekh sakta hai)
+    </div>
+  </section>
+  <section class="login-form">
+    <form id="f" autocomplete="on">
+      <h2 style="margin-bottom:16px">Sign in</h2>
+      <div class="field"><label for="u">Username</label><input id="u" name="username" autocomplete="username" required autofocus></div>
+      <div class="field"><label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
+      <div id="err" class="notice hide" role="alert"></div>
+      <button class="btn" style="width:100%;justify-content:center" type="submit">Sign in</button>
+    </form>
+  </section>
+</div>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script>
+(async () => {
+  await DB.init();
+  if (await Auth.current()) return location.replace('dashboard.html');
+  const s = await DB.getSettings();
+  $('#schoolName').textContent = s.school_name;
+  $('#f').addEventListener('submit', async e => {
+    e.preventDefault();
+    const u = await Auth.login($('#u').value, $('#p').value);
+    if (!u) { const er = $('#err'); er.textContent = 'Username ya password ghalat hai.'; er.classList.remove('hide'); return; }
+    location.href = 'dashboard.html';
+  });
+})();
+</script>
+</body>
+</html>

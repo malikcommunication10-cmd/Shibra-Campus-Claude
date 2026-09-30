@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Students</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="page" hidden>
+  <div class="tabs">
+    <button class="on" data-tab="list">Student list</button>
+    <button data-tab="promote" class="needs-edit">Promote / Passout</button>
+  </div>
+
+  <section data-pane="list">
+    <div class="card">
+      <div class="toolbar">
+        <input id="qSearch" type="search" placeholder="Search name, father, GR no, phone">
+        <select id="qStatus"><option value="">All status</option><option selected>Active</option><option>Inactive</option><option>Passout</option></select>
+        <select id="qClass"></select>
+      </div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>GR No</th><th>Student</th><th>Class</th><th>Phone</th><th class="num">Dues</th><th>Status</th><th></th></tr></thead>
+      <tbody id="sRows"></tbody></table></div>
+      <p class="hint" id="sCount"></p>
+    </div>
+  </section>
+
+  <section data-pane="promote" class="hide">
+    <div class="card">
+      <div class="card-h"><h2>Session end promotion</h2></div>
+      <div class="notice">Sirf Active students promote hote hain. Aakhri class walay Passout ho jate hain. Pehle backup le lein.</div>
+      <div class="row"><div class="field"><label for="pSession">Naya session</label><select id="pSession"></select></div>
+        <div class="field"><label for="pYear">Passout year</label><input id="pYear" type="number"></div></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>Include</th><th>From class</th><th>Active students</th><th>Move to</th></tr></thead><tbody id="pRows"></tbody></table></div>
+      <div style="margin-top:12px"><button class="btn" id="pApply">Apply promotion</button></div>
+    </div>
+  </section>
+</main>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script src="js/layout.js"></script>
+<script>
+(async () => {
+  const ctx = await Layout.init('students', 'Students');
+  const { settings: S, user } = ctx;
+  switchTabs();
+  const classes = (await DB.list('classes')).sort((a, b) => a.order - b.order);
+  const sections = await DB.list('sections');
+  const feeHeads = await DB.list('fee_heads');
+  const cname = id => (classes.find(c => c.id === id) || {}).name || '-';
+  const sname = id => (sections.find(s => s.id === id) || {}).name || '';
+  const canForce = ['admin', 'principal'].includes(user.role);
+  $('#qClass').innerHTML = '<option value="">All classes</option>' + classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+  /* ---------------- List ---------------- */
+  let students = [], dues = {};
+  async function load() {
+    students = (await DB.list('students')).sort((a, b) => a.gr_no.localeCompare(b.gr_no));
+    const led = await DB.list('ledger'); dues = {};
+    led.forEach(l => { if (l.student_id) dues[l.student_id] = (dues[l.student_id] || 0) + (+l.debit || 0) - (+l.credit || 0); });
+    render();
+  }
+  function render() {
+    const q = $('#qSearch').value.toLowerCase(), st = $('#qStatus').value, cl = $('#qClass').value;
+    const rows = students.filter(s => (!st || s.status === st) && (!cl || s.class_id === cl) &&
+      (!q || [s.name, s.father, s.gr_no, s.phone].join(' ').toLowerCase().includes(q)));
+    $('#sRows').innerHTML = rows.map(s => `<tr>
+      <td data-label="GR No">${esc(s.gr_no)}</td>
+      <td data-label="Student"><b>${esc(s.name)}</b><br><span class="muted">${esc(s.father)}</span></td>
+      <td data-label="Class">${esc(cname(s.class_id))} ${esc(sname(s.section_id))}</td>
+      <td data-label="Phone">${esc(s.phone)}</td>
+      <td data-label="Dues" class="num">${money(dues[s.id] || 0, S.currency)}</td>
+      <td data-label="Status">${sbadge(s.status)}</td>
+      <td class="act"><button class="btn ghost sm" data-view="${s.id}">Open</button></td></tr>`).join('')
+      || '<tr><td colspan="7" class="empty">Koi student nahi mila.</td></tr>';
+    $('#sCount').textContent = `${rows.length} students`;
+  }
+  ['qSearch', 'qStatus', 'qClass'].forEach(id => $('#' + id).addEventListener('input', render));
+  $('#sRows').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) openProfile(b.dataset.view); });
+
+  /* ---------------- Profile ---------------- */
+  async function openProfile(id) {
+    const s = await DB.get('students', id);
+    const due = dues[id] || 0;
+    const body = `
+      <div class="tabs"><button class="on" data-tab="p1">Profile</button><button data-tab="p2">Status</button><button data-tab="p3">Discounts</button><button data-tab="p4">Ledger</button></div>
+      <div data-pane="p1">${profileForm(s)}</div>
+      <div data-pane="p2" class="hide">${statusPane(s, due)}</div>
+      <div data-pane="p3" class="hide"><div id="discBox"></div></div>
+      <div data-pane="p4" class="hide"><div id="ledBox"></div></div>`;
+    const m = Modal.open({ title: `${s.name} (${s.gr_no})`, body, wide: true, saveText: 'Save profile', onSave: () => saveProfile(s) });
+    switchTabs(m);
+    const clsSel = $('#fClass', m), secSel = $('#fSec', m);
+    const fillSec = () => { secSel.innerHTML = sections.filter(x => x.class_id === clsSel.value).map(x => `<option value="${x.id}" ${x.id === s.section_id ? 'selected' : ''}>${esc(x.name)}</option>`).join(''); };
+    clsSel.onchange = fillSec; fillSec();
+    bindStatus(s, due, m); loadDiscounts(s, m); loadLedger(s, m);
+    // Save button sirf Profile tab ke liye
+    const sv = $('[data-save]', m); $$('.tabs button', m).forEach(b => b.addEventListener('click', () => sv.classList.toggle('hide', b.dataset.tab !== 'p1' || Auth.isReadonly(user))));
+  }
+
+  const DOCS = ['B-Form / Birth certificate', 'Father CNIC copy', 'Previous school certificate / SLC', 'Passport size photos', 'Vaccination card'];
+  function profileForm(s) {
+    return `<div class="row"><div class="field"><label>Student name *</label><input id="fName" value="${esc(s.name)}"></div>
+      <div class="field"><label>Father / guardian *</label><input id="fFather" value="${esc(s.father)}"></div></div>
+      <div class="row3"><div class="field"><label>Gender</label><select id="fGender"><option ${s.gender === 'Male' ? 'selected' : ''}>Male</option><option ${s.gender === 'Female' ? 'selected' : ''}>Female</option></select></div>
+        <div class="field"><label>Date of birth</label><input id="fDob" type="date" value="${esc(s.dob || '')}"></div>
+        <div class="field"><label>B-Form no</label><input id="fBform" value="${esc(s.b_form || '')}"></div></div>
+      <div class="row3"><div class="field"><label>Guardian CNIC</label><input id="fCnic" value="${esc(s.cnic || '')}"></div>
+        <div class="field"><label>Phone *</label><input id="fPhone" type="tel" value="${esc(s.phone || '')}"></div>
+        <div class="field"><label>WhatsApp</label><input id="fWa" type="tel" value="${esc(s.whatsapp || '')}"></div></div>
+      <div class="field"><label>Address</label><input id="fAddr" value="${esc(s.address || '')}"></div>
+      <div class="row3"><div class="field"><label>Class</label><select id="fClass">${classes.map(c => `<option value="${c.id}" ${c.id === s.class_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Section</label><select id="fSec"></select></div>
+        <div class="field"><label>Previous school</label><input id="fPrev" value="${esc(s.prev_school || '')}"></div></div>
+      <label>Documents</label><div class="doc-grid">${DOCS.map(d => `<label class="check"><input type="checkbox" data-doc="${esc(d)}" ${s.docs && s.docs[d] ? 'checked' : ''}> ${d}</label>`).join('')}</div>
+      <p class="hint">Reg No: ${esc(s.reg_no || '-')} &middot; Admission: ${fmtDate(s.admission_date)}${s.status === 'Passout' ? ` &middot; SLC: ${esc(s.slc_no || '-')} (${esc(s.passout_year || '')})` : ''}</p>`;
+  }
+  async function saveProfile(s) {
+    const v = id => $('#' + id).value.trim();
+    if (!v('fName') || !v('fFather') || !v('fPhone')) { toast('Name, father aur phone zaroori hain', true); return false; }
+    const docs = {}; $$('#modal [data-doc]').forEach(c => docs[c.dataset.doc] = c.checked);
+    await DB.update('students', s.id, { name: v('fName'), father: v('fFather'), gender: v('fGender'), dob: v('fDob'), b_form: v('fBform'), cnic: v('fCnic'),
+      phone: v('fPhone'), whatsapp: v('fWa'), address: v('fAddr'), class_id: v('fClass'), section_id: v('fSec'), prev_school: v('fPrev'), docs });
+    await DB.log(user.username, 'student.update', s.gr_no); toast('Saved'); load();
+  }
+
+  /* ---- status ---- */
+  function statusPane(s, due) {
+    const hist = (s.status_history || []).slice().reverse().map(h => `<tr><td data-label="Date">${fmtDate(h.date)}</td><td data-label="Status">${sbadge(h.status)}</td><td data-label="Reason">${esc(h.reason || '')}</td></tr>`).join('');
+    return `<p>Current status: ${sbadge(s.status)} &nbsp; Dues: <b>${money(due, S.currency)}</b></p>
+      <div class="card" style="background:var(--bg)"><div class="row3">
+        <div class="field"><label>Change to</label><select id="nsStatus">${['Active', 'Inactive', 'Passout'].filter(x => x !== s.status).map(x => `<option>${x}</option>`).join('')}</select></div>
+        <div class="field"><label>Date</label><input id="nsDate" type="date" value="${today()}"></div>
+        <div class="field"><label>Reason *</label><input id="nsReason" placeholder="e.g. SLC issue, family shift"></div></div>
+        <div class="row hide" id="nsPass"><div class="field"><label>Passout year</label><input id="nsYear" type="number" value="${new Date().getFullYear()}"></div>
+          <div class="field"><label>Certificate / SLC no</label><input id="nsSlc"></div></div>
+        <div class="notice hide" id="nsWarn"></div>
+        <button class="btn needs-edit" id="nsBtn">Change status</button></div>
+      <table class="rt" style="margin-top:12px"><thead><tr><th>Date</th><th>Status</th><th>Reason</th></tr></thead><tbody>${hist}</tbody></table>`;
+  }
+  function bindStatus(s, due, m) {
+    const sel = $('#nsStatus', m);
+    const sync = () => {
+      $('#nsPass', m).classList.toggle('hide', sel.value !== 'Passout');
+      const w = $('#nsWarn', m), leaving = sel.value !== 'Active' && due > 0;
+      w.classList.toggle('hide', !leaving);
+      if (leaving) w.textContent = canForce ? `Is student par ${money(due, S.currency)} baqaya hai. Aap Admin/Principal hain, approval ke sath aage barh sakte hain.` : `Is student par ${money(due, S.currency)} baqaya hai. Pehle dues clear karein ya Admin/Principal se karwayen.`;
+    };
+    sel.onchange = sync; sync();
+    $('#nsBtn', m).onclick = async () => {
+      const to = sel.value, reason = $('#nsReason', m).value.trim(), date = $('#nsDate', m).value;
+      if (!reason || !date) return toast('Date aur wajah likhna zaroori hai', true);
+      if (to !== 'Active' && due > 0) {
+        if (!canForce) return toast('Dues baqi hain, Admin/Principal approval chahiye', true);
+        if (!await confirmBox(`Baqaya ${money(due, S.currency)} hai. Phir bhi status "${to}" karein?`, 'Approve & change')) return;
+      }
+      const patch = { status: to, status_date: date, status_reason: reason, status_history: [...(s.status_history || []), { status: to, date, reason, by: user.username }] };
+      if (to === 'Passout') { patch.passout_year = $('#nsYear', m).value; patch.slc_no = $('#nsSlc', m).value.trim(); }
+      await DB.update('students', s.id, patch); await DB.log(user.username, 'student.status', `${s.gr_no} ${to}`);
+      Modal.close(); toast('Status updated'); load();
+    };
+  }
+
+  /* ---- discounts ---- */
+  const APPLIES = { once: 'One time', monthly: 'Har mahina', yearly: 'Har saal', session: 'Poora session', range: 'Date range' };
+  async function loadDiscounts(s, m) {
+    const rules = await DB.list('student_discounts', d => d.student_id === s.id);
+    const box = $('#discBox', m);
+    box.innerHTML = `<div class="table-wrap"><table class="rt"><thead><tr><th>Fee head</th><th>Discount</th><th>Applies</th><th>Reason</th><th></th></tr></thead><tbody>
+      ${rules.map(d => `<tr><td data-label="Fee head">${esc(d.head)}</td><td data-label="Discount">${d.type === 'pct' ? d.value + '%' : money(d.value, S.currency)}</td>
+        <td data-label="Applies">${APPLIES[d.applies]}${d.applies === 'range' ? ` (${esc(d.from)} to ${esc(d.to)})` : ''}</td><td data-label="Reason">${esc(d.reason)}</td>
+        <td class="act"><button class="btn danger sm needs-edit" data-rm="${d.id}">Remove</button></td></tr>`).join('')
+        || '<tr><td colspan="5" class="empty">Koi discount rule nahi.</td></tr>'}</tbody></table></div>
+      <div class="card needs-edit" style="background:var(--bg);margin-top:12px"><b>Add discount rule</b>
+        <div class="row3" style="margin-top:8px"><div class="field"><label>Fee head</label><select id="dhHead">${feeHeads.map(h => `<option>${esc(h.name)}</option>`).join('')}<option>All fees (poora challan)</option></select></div>
+          <div class="field"><label>Discount</label><span id="dhBox"></span></div>
+          <div class="field"><label>Reason</label><select id="dhReason">${DISCOUNT_REASONS.map(r => `<option>${r}</option>`).join('')}</select></div></div>
+        <div class="row"><div class="field"><label>Applies</label><select id="dhApplies">${Object.entries(APPLIES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+          <div class="row hide" id="dhRange"><div class="field"><label>From</label><input id="dhFrom" type="month"></div><div class="field"><label>To</label><input id="dhTo" type="month"></div></div></div>
+        <button class="btn sm" id="dhAdd">Add rule</button></div>`;
+    $('#dhBox', m).innerHTML = Disc.html('dh');
+    $('#dhApplies', m).onchange = e => $('#dhRange', m).classList.toggle('hide', e.target.value !== 'range');
+    $('#dhAdd', m).onclick = async () => {
+      const value = parseFloat($('#dhV', m).value) || 0, type = $('#dhT', m).value;
+      if (value <= 0) return toast('Discount value likhein', true);
+      if (type === 'pct' && value > 100) return toast('Percentage 100 se zyada nahi ho sakta', true);
+      if (user.role === 'clerk' && type === 'pct' && value > S.clerk_discount_limit) return toast(`Clerk ${S.clerk_discount_limit}% tak hi de sakta hai. Admin/Principal approval chahiye.`, true);
+      const applies = $('#dhApplies', m).value, from = $('#dhFrom', m).value, to = $('#dhTo', m).value;
+      if (applies === 'range' && (!from || !to || to < from)) return toast('Date range theek likhein', true);
+      await DB.insert('student_discounts', { student_id: s.id, head: $('#dhHead', m).value, type, value, applies, from, to, session_id: ctx.session && ctx.session.id, reason: $('#dhReason', m).value, by: user.username });
+      await DB.log(user.username, 'discount.add', `${s.gr_no} ${$('#dhHead', m).value} ${value}${type === 'pct' ? '%' : ''}`);
+      toast('Discount rule added'); loadDiscounts(s, m);
+    };
+    $$('[data-rm]', m).forEach(b => b.onclick = async () => { await DB.remove('student_discounts', b.dataset.rm); loadDiscounts(s, m); });
+  }
+
+  /* ---- ledger ---- */
+  async function loadLedger(s, m) {
+    const rows = (await DB.list('ledger', l => l.student_id === s.id)).sort((a, b) => (a.date + a.created_at).localeCompare(b.date + b.created_at));
+    let bal = 0;
+    $('#ledBox', m).innerHTML = `<div class="table-wrap"><table class="rt"><thead><tr><th>Date</th><th>Detail</th><th>Ref</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>
+      ${rows.map(l => { bal += (+l.debit || 0) - (+l.credit || 0); return `<tr><td data-label="Date">${fmtDate(l.date)}</td><td data-label="Detail">${esc(l.detail)}</td><td data-label="Ref">${esc(l.ref || '')}</td>
+        <td data-label="Debit" class="num">${l.debit ? money(l.debit, '') : ''}</td><td data-label="Credit" class="num">${l.credit ? money(l.credit, '') : ''}</td><td data-label="Balance" class="num">${money(bal, '')}</td></tr>`; }).join('')
+        || '<tr><td colspan="6" class="empty">Abhi koi entry nahi.</td></tr>'}</tbody></table></div>`;
+  }
+
+  /* ---------------- Promote ---------------- */
+  const sessions = await DB.list('sessions');
+  $('#pSession').innerHTML = sessions.map(x => `<option value="${x.id}" ${x.is_active ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  $('#pYear').value = new Date().getFullYear();
+  async function loadPromote() {
+    const active = students.filter(s => s.status === 'Active');
+    $('#pRows').innerHTML = classes.map((c, i) => {
+      const n = active.filter(s => s.class_id === c.id).length, next = classes[i + 1];
+      const def = c.is_last || !next ? 'passout' : next.id;
+      return `<tr data-cls="${c.id}"><td data-label="Include"><input type="checkbox" class="pInc" ${n ? 'checked' : ''} ${n ? '' : 'disabled'}></td>
+        <td data-label="From class"><b>${esc(c.name)}</b></td><td data-label="Active students">${n}</td>
+        <td data-label="Move to"><select class="pTo"><option value="stay">Stay (repeat)</option>${classes.filter(x => x.id !== c.id).map(x => `<option value="${x.id}" ${x.id === def ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}<option value="passout" ${def === 'passout' ? 'selected' : ''}>Passout</option></select></td></tr>`;
+    }).join('');
+  }
+  $('#pApply').onclick = async () => {
+    if (user.role !== 'admin') return toast('Promotion sirf Admin kar sakta hai', true);
+    const plan = $$('#pRows tr').filter(r => $('.pInc', r).checked).map(r => ({ from: r.dataset.cls, to: $('.pTo', r).value }));
+    if (!plan.length) return toast('Koi class select nahi', true);
+    if (!await confirmBox('Promotion apply karein? Ye students ki class badal dega.', 'Apply')) return;
+    const sess = $('#pSession').value, yr = $('#pYear').value;
+    // Pehle saari list ka snapshot, taake ek class ke students dobara promote na hon
+    const snap = students.filter(s => s.status === 'Active'); let moved = 0, out = 0;
+    for (const s of snap) {
+      const p = plan.find(x => x.from === s.class_id); if (!p || p.to === 'stay') continue;
+      const hist = [...(s.status_history || [])];
+      if (p.to === 'passout') {
+        hist.push({ status: 'Passout', date: today(), reason: 'Session end', by: user.username });
+        await DB.update('students', s.id, { status: 'Passout', passout_year: yr, status_date: today(), status_reason: 'Session end', status_history: hist }); out++;
+      } else {
+        const secs = sections.filter(x => x.class_id === p.to), cur = sname(s.section_id);
+        const sec = secs.find(x => x.name === cur) || secs[0];
+        hist.push({ status: 'Active', date: today(), reason: `Promoted to ${cname(p.to)}`, by: user.username });
+        await DB.update('students', s.id, { class_id: p.to, section_id: sec ? sec.id : '', session_id: sess, status_history: hist }); moved++;
+      }
+    }
+    await DB.log(user.username, 'promotion', `${moved} promoted, ${out} passout`);
+    toast(`${moved} promote, ${out} passout`); await load(); loadPromote();
+  };
+
+  await load(); loadPromote();
+})();
+</script>
+</body>
+</html>
