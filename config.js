@@ -10,7 +10,7 @@
    Dono khali rakhein to app demo mode (browser ka localStorage) mein chalti hai.
    ===================================================================== */
 window.APP_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_KEY: '',
-  LOGIN_DOMAIN: 'school.local'   // username ke peechay lagne wala email domain (Auth mein user isi email se bana ho)
+  SUPABASE_URL: 'https://fbwrtxobugyeygjkdeiv.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_SKZ1-BF8cVufWznEL7ojiA_kad8ik9B',
+  LOGIN_DOMAIN: 'shabbironeone@gmail.com'   // username ke peechay lagne wala email domain (Auth mein user isi email se bana ho)
 };
