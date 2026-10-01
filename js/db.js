@@ -136,9 +136,16 @@ const LocalDB = (() => {
 /* =====================================================================
    SupaDB - Supabase backend (supabase/schema.sql wali tables)
    ===================================================================== */
-const SupaDB = (() => {
+const makeSupaDB = () => {
   const cfg = window.APP_CONFIG;
-  const sb = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
+  const KEY_ = String(cfg.SUPABASE_KEY || '').trim();
+  let URL_;
+  try { URL_ = new URL(String(cfg.SUPABASE_URL || '').trim()).origin; }      // /rest/v1/ ya aakhri / ho to bhi theek
+  catch (e) { throw new Error('SUPABASE_URL theek nahi. Ye https://xxxx.supabase.co jaisa hona chahiye.'); }
+  if (!/^https?:/.test(URL_)) throw new Error('SUPABASE_URL https:// se shuru hona chahiye.');
+  if (/^sb_secret_|service_role/i.test(KEY_)) throw new Error('Ye SECRET key hai! Yahan sirf Publishable (ya anon) key likhein, aur secret key foran Supabase mein regenerate karein.');
+  if (KEY_.length < 20) throw new Error('SUPABASE_KEY khali ya adhoori hai. Publishable key poori copy karein.');
+  const sb = supabase.createClient(URL_, KEY_);
   const ALIAS = { users: 'profiles' };
   const COLS = {"profiles": ["id", "username", "name", "role", "active", "created_at", "updated_at"], "settings": ["id", "data", "updated_at"], "sessions": ["id", "name", "start_date", "end_date", "is_active", "created_at", "updated_at"], "classes": ["id", "name", "sort_order", "is_last", "created_at", "updated_at"], "sections": ["id", "class_id", "name", "capacity", "created_at", "updated_at"], "fee_heads": ["id", "name", "type", "system", "created_at", "updated_at"], "fee_structure": ["id", "class_id", "head_id", "amount", "created_at", "updated_at"], "enquiries": ["id", "name", "phone", "class_id", "note", "date", "status", "created_at", "updated_at"], "applicants": ["id", "reg_no", "name", "father", "gender", "phone", "address", "class_id", "session_id", "reg_date", "reg_gross", "reg_discount", "reg_net", "status", "enquiry_id", "student_id", "created_at", "updated_at"], "students": ["id", "gr_no", "reg_no", "applicant_id", "name", "father", "gender", "dob", "b_form", "cnic", "phone", "whatsapp", "address", "class_id", "section_id", "session_id", "admission_date", "prev_school", "sibling_of", "docs", "status", "status_date", "status_reason", "passout_year", "slc_no", "status_history", "created_at", "updated_at"], "student_discounts": ["id", "student_id", "head", "type", "value", "applies", "from_month", "to_month", "session_id", "reason", "by", "used_at", "last_session", "created_at", "updated_at"], "student_rates": ["id", "student_id", "head_id", "amount", "effective_from", "created_at", "updated_at"], "fee_increments": ["id", "student_id", "head", "old_amount", "new_amount", "effective_from", "by", "date", "created_at", "updated_at"], "challans": ["id", "no", "student_id", "class_id", "month", "session_id", "due_date", "lines", "gross", "discount", "all_discount", "net", "late_fee", "paid", "rules_used", "by", "created_at", "updated_at"], "receipts": ["id", "no", "type", "date", "title", "party", "ref", "lines", "gross", "discount", "net", "received", "balance", "mode", "by", "remarks", "student_id", "applicant_id", "created_at", "updated_at"], "ledger": ["id", "student_id", "applicant_id", "challan_id", "date", "detail", "ref", "head", "kind", "debit", "credit", "created_at", "updated_at"], "counters": ["name", "value"], "audit": ["id", "at", "user_name", "action", "detail"]};
   // App ke purane naam <-> database ke naam
@@ -260,7 +267,7 @@ const SupaDB = (() => {
 
     // Naya user: alag temporary client se signUp (admin ka login nahi tootta), phir profile row
     async createUser({ username, name, role, password }) {
-      const tmp = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'serp-tmp-signup' } });
+      const tmp = supabase.createClient(URL_, KEY_, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'serp-tmp-signup' } });
       const { data, error } = await tmp.auth.signUp({ email: emailOf(username), password });
       if (error) throw new Error('User nahi bana: ' + error.message);
       if (!data.user || (data.user.identities && !data.user.identities.length)) throw new Error('Ye username pehle se registered hai.');
@@ -283,8 +290,24 @@ const SupaDB = (() => {
     async importAll() { throw new Error('Supabase mode mein restore band hai (data kharab hone ka khatra). Purana data Google Sheet ke menu se shift karein.'); },
     async resetAll() { throw new Error('Supabase mode mein reset band hai.'); }
   };
-})();
+};
 
-// Konsa backend? js/config.js mein URL ho aur supabase library load ho to Supabase, warna demo (localStorage)
-const DB = (window.APP_CONFIG && window.APP_CONFIG.SUPABASE_URL && window.APP_CONFIG.SUPABASE_KEY && window.supabase) ? SupaDB : LocalDB;
-if (window.APP_CONFIG && window.APP_CONFIG.SUPABASE_URL && DB.mode !== 'supabase') console.error('Supabase library load nahi hui, demo mode chal raha hai.');
+// Konsa backend? config.js mein URL aur key ho to Supabase, warna demo (localStorage).
+// Supabase mein koi masla ho to page toot'ne ke bajaye laal message dikhata hai.
+const DB = (() => {
+  const c = window.APP_CONFIG || {};
+  if (!(c.SUPABASE_URL || c.SUPABASE_KEY)) return LocalDB;
+  const fail = msg => {
+    console.error('Supabase config masla:', msg);
+    const show = () => { const d = document.createElement('div'); d.setAttribute('role', 'alert');
+      d.style.cssText = 'background:#c0392b;color:#fff;padding:12px 16px;font:14px/1.4 sans-serif;position:sticky;top:0;z-index:999';
+      d.textContent = 'Supabase se connect nahi ho paya: ' + msg + ' (js/config.js check karein)'; document.body.prepend(d); };
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+    const err = () => { throw new Error('Supabase se connect nahi: ' + msg); };
+    return { mode: 'error', async init() {}, async authCurrent() { return null; }, authLogin: err, authLogout: async () => {},
+      list: err, get: err, insert: err, update: err, remove: err, removeWhere: err, nextNo: err, balance: err,
+      getSettings: async () => ({ school_name: 'School ERP' }), saveSettings: err, log: async () => {} };
+  };
+  if (!window.supabase) return fail('Supabase library load nahi hui (internet ya adblock check karein).');
+  try { return makeSupaDB(); } catch (e) { return fail(e.message); }
+})();
