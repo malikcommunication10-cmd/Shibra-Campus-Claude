@@ -77,7 +77,7 @@
   <section data-pane="backup" class="hide">
     <div class="card">
       <div class="card-h"><h2>Backup &amp; restore</h2></div>
-      <div class="notice">Abhi data sirf is browser mein hai. Regular backup lein. Supabase link hone ke baad ye khud server par rahega.</div>
+      <div class="notice" id="backupNote">Abhi data sirf is browser mein hai. Regular backup lein. Supabase link hone ke baad ye khud server par rahega.</div>
       <div class="actions">
         <button class="btn" id="exportBtn">Download backup</button>
         <button class="btn ghost needs-edit" id="importBtn">Restore from file</button>
@@ -87,6 +87,8 @@
     </div>
   </section>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
 <script src="js/layout.js"></script>
@@ -134,27 +136,29 @@
     return `<div class="field"><label>Full name</label><input id="uName" value="${esc(u.name || '')}"></div>
       <div class="row"><div class="field"><label>Username</label><input id="uUser" value="${esc(u.username || '')}" autocapitalize="off"></div>
       <div class="field"><label>Role</label><select id="uRole">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${r.label}</option>`).join('')}</select></div></div>
-      <div class="field"><label>${u.id ? 'New password (khali chorein to wahi rahega)' : 'Password'}</label><input id="uPass" type="text" autocomplete="off"></div>
+      ${(!u.id || DB.mode === 'local' || u.id === ctx.user.id) ? `<div class="field"><label>${u.id ? 'New password (khali chorein to wahi rahega)' : 'Password (kam az kam 6 characters)'}</label><input id="uPass" type="text" autocomplete="off"></div>`
+        : '<p class="hint">Is user ka password Supabase Dashboard > Authentication > Users se badla jata hai.</p>'}
       ${u.id ? `<label class="check"><input type="checkbox" id="uActive" ${u.active ? 'checked' : ''}> Active</label>` : ''}`;
   }
   async function saveUser(id) {
-    const name = $('#uName').value.trim(), username = $('#uUser').value.trim().toLowerCase(), role = $('#uRole').value, pw = $('#uPass').value;
+    const name = $('#uName').value.trim(), username = $('#uUser').value.trim().toLowerCase(), role = $('#uRole').value, pw = $('#uPass') ? $('#uPass').value : '';
     if (!name || !username) { toast('Name aur username zaroori hain', true); return false; }
     if (!id && pw.length < 6) { toast('Password kam az kam 6 characters ka ho', true); return false; }
     if (id && pw && pw.length < 6) { toast('Password kam az kam 6 characters ka ho', true); return false; }
     const all = await DB.list('users');
     if (all.some(u => u.id !== id && u.username === username)) { toast('Ye username pehle se hai', true); return false; }
     const data = { name, username, role };
-    if (pw) data.pass_hash = await DB.sha(pw);
     if (id) {
       const active = $('#uActive').checked;
       const admins = all.filter(u => u.role === 'admin' && u.active && u.id !== id).length;
       if ((!active || role !== 'admin') && all.find(u => u.id === id).role === 'admin' && admins === 0) { toast('Kam az kam ek active Admin lazmi hai', true); return false; }
       data.active = active;
       await DB.update('users', id, data);
-      if (pw && id === ctx.user.id) localStorage.setItem('serp_pw_changed', '1');
-      if (pw && ctx.user.username === 'admin') localStorage.setItem('serp_pw_changed', '1');
-    } else await DB.insert('users', { ...data, active: true });
+      if (pw) await DB.setPassword(id, pw);
+    } else {
+      const r = await DB.createUser({ ...data, password: pw });
+      if (r && r.note) toast(r.note, true);
+    }
     await DB.log(ctx.user.username, id ? 'user.update' : 'user.add', username);
     toast('Saved'); loadUsers();
   }
@@ -167,6 +171,10 @@
   loadUsers();
 
   /* ---- backup ---- */
+  if (DB.mode === 'supabase') {
+    $('#importBtn').classList.add('hide'); $('#resetBtn').classList.add('hide');
+    $('#backupNote').textContent = 'Data Supabase par hai. "Download backup" Supabase ke saare records ki JSON copy deta hai. Restore aur reset yahan se band hain.';
+  }
   $('#exportBtn').onclick = async () => downloadJSON(await DB.exportAll(), `school-erp-backup-${today()}.json`);
   $('#importBtn').onclick = () => $('#importFile').click();
   $('#importFile').onchange = async e => {

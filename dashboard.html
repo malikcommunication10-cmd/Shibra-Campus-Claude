@@ -22,6 +22,8 @@
     </div>
   </div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
 <script src="js/layout.js"></script>
@@ -52,7 +54,7 @@
     ['School ka naam aur address likhein', s.school_name !== 'My School' && !!s.address, 'settings.html'],
     ['Session set karein', !!ctx.session, 'classes.html'],
     ['Classes aur sections check karein', classes.length > 0 && sections.length > 0, 'classes.html'],
-    ['Demo passwords badlein', !!localStorage.getItem('serp_pw_changed'), 'settings.html']
+    [DB.mode === 'supabase' ? 'Supabase se connected' : 'Demo passwords badlein', DB.mode === 'supabase' || !!localStorage.getItem('serp_pw_changed'), 'settings.html']
   ];
   $('#steps').innerHTML = checks.map(([t, ok, href]) =>
     `<li><span class="dot ${ok ? 'done' : ''}">${ok ? '&#10003;' : ''}</span><a href="${href}" style="flex:1;color:inherit">${t}</a></li>`).join('');

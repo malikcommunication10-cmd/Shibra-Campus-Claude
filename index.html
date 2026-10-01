@@ -30,18 +30,21 @@
     </form>
   </section>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
 <script>
 (async () => {
   await DB.init();
   if (await Auth.current()) return location.replace('dashboard.html');
-  const s = await DB.getSettings();
-  $('#schoolName').textContent = s.school_name;
+  if (DB.mode === 'supabase') $('.demo').classList.add('hide');
+  let s = {}; try { s = await DB.getSettings(); } catch (e) { s = {}; }
+  $('#schoolName').textContent = s.school_name || 'School ERP';
   $('#f').addEventListener('submit', async e => {
     e.preventDefault();
     const u = await Auth.login($('#u').value, $('#p').value);
-    if (!u) { const er = $('#err'); er.textContent = 'Username ya password ghalat hai.'; er.classList.remove('hide'); return; }
+    if (!u) { const er = $('#err'); er.textContent = DB.mode === 'supabase' ? 'Username ya password ghalat hai, ya is user ka profile (role) nahi bana.' : 'Username ya password ghalat hai.'; er.classList.remove('hide'); return; }
     location.href = 'dashboard.html';
   });
 })();

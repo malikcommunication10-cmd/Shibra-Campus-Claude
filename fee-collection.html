@@ -68,6 +68,8 @@
     </div>
   </section>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
 <script src="js/fees.js"></script>
@@ -151,7 +153,7 @@
       const toOther = Math.min(left, other); if (toOther > 0) { alloc.push({ detail: 'Previous / other dues', amount: toOther }); left = r2(left - toOther); }
       for (const c of unpaid) { if (left <= 0) break; const a = Math.min(left, outstanding(c)); if (a <= 0) continue;
         await DB.update('challans', c.id, { paid: r2((c.paid || 0) + a) }); alloc.push({ detail: `Fee ${monthLabel(c.month)} (${c.no})`, amount: a }); left = r2(left - a); }
-      const rcNo = nextReceiptNo(S);
+      const rcNo = await nextReceiptNo(S);
       if (d > 0) await DB.insert('ledger', { student_id: id, date, detail: 'Extra discount (approved)', ref: rcNo, head: 'Fee Discount', kind: 'discount', debit: 0, credit: d });
       if (r > 0) await DB.insert('ledger', { student_id: id, date, detail: `Fee received (${mode})`, ref: rcNo, head: 'Fee', kind: 'payment', debit: 0, credit: r });
       const rc = { no: rcNo, date, title: 'Fee Receipt', party: `${st.name} s/o ${st.father}`, ref: `${st.gr_no} / ${cname(st.class_id)}`, lines: alloc,

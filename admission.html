@@ -79,6 +79,8 @@
   <!-- ============ Admit ============ -->
   <section data-pane="admit" class="hide"><div id="admitBox"></div></section>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
 <script src="js/layout.js"></script>
@@ -117,13 +119,13 @@
     if (dup) return toast(`Ye applicant pehle se registered hai (${dup.reg_no}). Registration fee sirf ek dafa lagti hai.`, true);
 
     const yr = new Date().getFullYear();
-    const reg_no = `${S.reg_prefix}-${yr}-${pad(DB.nextNo('reg' + yr), 3)}`;
+    const reg_no = `${S.reg_prefix}-${yr}-${pad(await DB.nextNo('reg' + yr), 3)}`;
     const app = await DB.insert('applicants', {
       reg_no, name: v('rName'), father: v('rFather'), gender: v('rGender'), phone: v('rPhone'), address: v('rAddress'),
       class_id: $('#rClass').value, session_id: ctx.session && ctx.session.id, reg_date: today(),
       reg_gross: gross, reg_discount: disc, reg_net: net, status: 'Registered', enquiry_id: fromEnquiry
     });
-    const rcNo = net > 0 ? nextReceiptNo(S) : '-';
+    const rcNo = net > 0 ? await nextReceiptNo(S) : '-';
     const L = (debit, credit, detail) => DB.insert('ledger', { applicant_id: app.id, date: today(), detail, ref: rcNo !== '-' ? rcNo : reg_no, head: 'Registration', debit, credit });
     if (gross > 0) await L(gross, 0, 'Registration fee');
     if (disc > 0) await L(0, disc, 'Discount on registration fee');
@@ -291,7 +293,7 @@
         if (cnt >= sec.capacity && !await confirmBox(`Section ${sec.name} full hai (${cnt}/${sec.capacity}). Phir bhi admit karein?`, 'Admit')) return;
       }
       const docs = {}; $$('[data-doc]').forEach(c => docs[c.dataset.doc] = c.checked);
-      const gr_no = `${S.gr_prefix}-${pad(DB.nextNo('gr'), 4)}`;
+      const gr_no = `${S.gr_prefix}-${pad(await DB.nextNo('gr'), 4)}`;
       const stu = await DB.insert('students', {
         gr_no, reg_no: a.reg_no, applicant_id: a.id, name: v('dName'), father: v('dFather'), gender: v('dGender'), dob: v('dDob'), b_form: v('dBform'),
         cnic: v('dCnic'), phone: v('dPhone'), whatsapp: v('dWa'), address: v('dAddr'), class_id: $('#dClass').value, section_id: secId,
@@ -301,7 +303,7 @@
       await DB.update('applicants', a.id, { status: 'Admitted', student_id: stu.id });
       // registration ke ledger rows ab student ke naam par bhi
       for (const l of await DB.list('ledger', x => x.applicant_id === a.id)) await DB.update('ledger', l.id, { student_id: stu.id });
-      const rcNo = recv > 0 ? nextReceiptNo(S) : gr_no;
+      const rcNo = recv > 0 ? await nextReceiptNo(S) : gr_no;
       const L = (debit, credit, detail) => DB.insert('ledger', { student_id: stu.id, applicant_id: a.id, date: adDate, detail, ref: rcNo, head: 'Admission', debit, credit });
       if (gross > 0) await L(gross, 0, 'Admission fee');
       if (disc > 0) await L(0, disc, 'Discount on admission fee');

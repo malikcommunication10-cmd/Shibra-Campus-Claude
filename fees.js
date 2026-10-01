@@ -63,7 +63,7 @@ const Fees = {
   },
   // Save karo: challan + ledger entries + rules ka "used" nishaan
   async create(st, month, due, session, calc, by) {
-    const no = 'CH-' + pad(DB.nextNo('challan'), 6), label = 'Fee ' + monthLabel(month);
+    const no = 'CH-' + pad(await DB.nextNo('challan'), 6), label = 'Fee ' + monthLabel(month);
     const c = await DB.insert('challans', { no, student_id: st.id, class_id: st.class_id, month, session_id: session && session.id, due_date: due,
       lines: calc.lines, gross: calc.gross, discount: calc.lineDisc, all_discount: calc.all, net: calc.net, late_fee: 0, paid: 0, rules_used: calc.used, by });
     const base = { student_id: st.id, date: today(), ref: no, challan_id: c.id };

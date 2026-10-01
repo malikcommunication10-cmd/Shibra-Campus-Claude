@@ -18,6 +18,16 @@ admin / admin123 - accountant / acc123 - clerk / clerk123 - principal / principa
 - `js/layout.js` : sidebar + topbar + menu
 - `css/style.css` : mobile + desktop styles
 
+## Supabase se connect karna
+1. `supabase/schema.sql` chalayen, phir `supabase/patch_1.sql`.
+2. Authentication > Users mein admin banayen: email `admin@school.local` (username `admin`), password apna, "Auto Confirm" on. Phir schema.sql ke aakhir wali `insert into profiles ...` query chalayen.
+3. Authentication > Providers > Email: naye users app se banane hain to **Confirm email band** karein.
+4. `js/config.js` mein `SUPABASE_URL` (Project Settings > API > Project URL) aur `SUPABASE_KEY` (usi page ki **Publishable key**, `sb_publishable_...`, ya purani anon key) likhein.
+5. GitHub par `js/config.js` edit karke commit karein. 1-2 minute mein site update ho jati hai.
+
+**Secret / service_role key GitHub par kabhi na dalein.** Publishable key public ho sakti hai, data ki hifazat Row Level Security (schema.sql) karti hai.
+`config.js` khali ho to app demo mode (localStorage) mein chalti hai.
+
 ## Phase 3 mein
 Fee Structure (class-wise amounts, heads, % / Rs. increment, late fee), Fee Collection (bulk generate, receive, partial, challan print, daybook), Fee Ledger (statement, defaulters, WhatsApp reminder).
 

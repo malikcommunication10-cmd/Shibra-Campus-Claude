@@ -14,25 +14,11 @@ const ROLES = {
   clerk:      { label: 'Clerk',      pages: ['dashboard', 'admission', 'students', 'fee-collection', 'fee-ledger', 'books-sale'], readonly: false }
 };
 
-/* ---------- Auth (demo). Supabase Auth se replace hoga ---------- */
+/* ---------- Auth (DB layer se: demo ya Supabase Auth) ---------- */
 const Auth = {
-  KEY: 'serp_auth',
-  async login(username, password) {
-    const users = await DB.list('users');
-    const u = users.find(x => x.username.toLowerCase() === username.trim().toLowerCase());
-    if (!u || !u.active) return null;
-    if (u.pass_hash !== await DB.sha(password)) return null;
-    localStorage.setItem(this.KEY, u.id);
-    await DB.log(u.username, 'login', '');
-    return u;
-  },
-  async current() {
-    const id = localStorage.getItem(this.KEY);
-    if (!id) return null;
-    const u = await DB.get('users', id);
-    return u && u.active ? u : null;
-  },
-  logout() { localStorage.removeItem(this.KEY); location.href = 'index.html'; },
+  login: (u, p) => DB.authLogin(u, p),
+  current: () => DB.authCurrent(),
+  async logout() { await DB.authLogout(); location.href = 'index.html'; },
   canOpen(user, page) { const r = ROLES[user.role]; return r && (r.pages === '*' || r.pages.includes(page)); },
   isReadonly(user) { return !!(ROLES[user.role] && ROLES[user.role].readonly); }
 };
@@ -125,7 +111,7 @@ const Disc = {
 
 /* ---------- Numbers ---------- */
 const pad = (n, w) => String(n).padStart(w, '0');
-const nextReceiptNo = s => `${s.receipt_prefix}-${pad(DB.nextNo('receipt'), 6)}`;
+const nextReceiptNo = async s => `${s.receipt_prefix}-${pad(await DB.nextNo('receipt'), 6)}`;
 
 /* ---------- Receipt (print) ----------
    r = {no,date,title,party,ref,lines:[{detail,amount}],gross,discount,net,received,balance,mode,by} */
@@ -172,3 +158,6 @@ async function bindPicker(id, onPick, filter) {
   });
   list.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; list.classList.add('hide'); inp.value = ''; onPick(all.find(s => s.id === b.dataset.id)); });
 }
+
+/* Koi bhi database error ho to chup chap fail hone ke bajaye screen par dikhao */
+window.addEventListener('unhandledrejection', e => { const m = e.reason && e.reason.message; if (m) { toast(m, true); console.error(e.reason); } });
